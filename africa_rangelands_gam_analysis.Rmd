@@ -837,7 +837,7 @@ plots <- map(var_list, function(var) {
 # Create main GAM figure
 gam_plot <- ggarrange(plotlist = plots, ncol = 3, nrow = 4, common.legend = TRUE)
 
-# Save spatial term map (CHOOSE DIRECTORY PATH)
+# Save spatial term map
 ggsave(paste0(plot_dir, "main_gam_plot.jpg"),
        plot = gam_plot,
        width = 20, height = 30, units = "cm", dpi = 300)
