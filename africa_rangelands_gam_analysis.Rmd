@@ -27,6 +27,8 @@ are calculated as the mean value of 2001-2019 annual values.
 options(repos = c(CRAN = "https://cran.rstudio.org"))
 .libPaths("C:/Program Files/Microsoft/R Open/R-4.0.2/library")
 
+# SET DIRECTORY TO SAVE FIGURES
+plot_dir <- "figures/"
 
 library(tidyverse)
 library(terra)
@@ -60,9 +62,11 @@ Raster data layers prepared, cropped and aggregated to 0.05 deg resolution
 using Google Earth Engine.
 
 
-```{r load, results = "hide", include = FALSE}
+```{r load_data, results = "hide", include = FALSE}
 
-# Africa country boundaries
+## EDIT FILE PATHS TO RELEVANT DIRECTORIES
+
+# Africa country boundaries (Natural Earth dataset)
 countries <- st_read("raw_data/vector/natural_earth/ne_110m_admin_0_countries_fixed.shp")
 africa <- filter(countries, CONTINENT == "Africa")
 africa_vct <- vect(africa)
@@ -145,18 +149,18 @@ igbp_mask <- mask(igbp, africa_vct)
 
 # Most common assigned IGBP class
 
-# getMode <- function(x) {
-# keys <- na.omit(unique(x))
-# keys[which.max(tabulate(match(x, keys)))]
-# }
-# 
-# igbp_mode <- app(igbp_mask, getMode)
-# 
+getMode <- function(x) {
+keys <- na.omit(unique(x))
+keys[which.max(tabulate(match(x, keys)))]
+}
+
+igbp_mode <- app(igbp_mask, getMode)
+
 # # Write and read modal IGBP class layer (slow to calculate)
 # writeRaster(igbp_mode, "processed_data/raster/modis/igbp_mode.tif",
 #             overwrite = TRUE)
-
-igbp_mode <- rast("processed_data/raster/modis/igbp_mode.tif")
+# 
+# igbp_mode <- rast("processed_data/raster/modis/igbp_mode.tif")
 
 # Aridity index mask (include areas with 0.05 < ai > 0.65)
 ai_mask <- (ai > 500 & ai < 6500)
@@ -320,9 +324,16 @@ p2 <- ggarrange(gpp_map, gpp_cv, gpp_ugi, gpp_season, gpp_onset_sd, gpp_int, gpp
 p3 <- ggarrange(gpp_soilN, gpp_sand, gpp_T, gpp_lst, gpp_fire,
                 nrow = 3, ncol = 2, common.legend = TRUE)
 
-ggsave("figures/paper_1_plots/p1.jpg", p1, width = 16, height = 20, units = "cm", dpi = 300)
-ggsave("figures/paper_1_plots/p2.jpg", p2, width = 16, height = 24, units = "cm", dpi = 300)
-ggsave("figures/paper_1_plots/p3.jpg", p3, width = 16, height = 20, units = "cm", dpi = 300)
+# Save figures to directory
+
+ggsave(paste0(plot_dir, "p1.jpg"),
+       plot = p1,
+       width = 16, height = 20, units = "cm", dpi = 300)
+ggsave(paste0(plot_dir, "p2.jpg"),
+       plot = p2,
+       width = 16, height = 24, units = "cm", dpi = 300)
+ggsave(paste0(plot_dir, "p3.jpg"),
+       plot = p3, width = 16, height = 20, units = "cm", dpi = 300)
 
 ```
 
@@ -482,9 +493,12 @@ soilP_map
 T_map
 lst_map
 
+# Save map figure to directory
+
 multi_plot <- tmap_arrange(gpp_map, map_map, T_map, lst_map)
 
-tmap_save(multi_plot, "figures/paper_1_plots/multi_map_plot.jpg",
+tmap_save(multi_plot,
+          paste0(plot_dir, "multi_map_plot.jpg"),
           width = 20, height = 18, units = "cm", dpi = 200)
 
 ```
@@ -504,11 +518,14 @@ var_names <- c("GPP", "MAP", "CV", "SDII", "dry", "UGi", "PCI", ":F[95]",
 colnames(cor_matrix) <- var_names
 rownames(cor_matrix) <- var_names
 
+# Save correlation plot figure to directory
 
-jpeg("figures/paper_1_plots/cor_plot.jpg",
+jpeg(paste0(plot_dir, "cor_plot.jpg"),
      height = 50, width = 50, units = "cm", res = 300)
+
 corrplot::corrplot(cor_matrix, method = "number", type = "upper",
                                tl.cex = 3, number.cex = 1.8, cl.cex = 2)
+
 dev.off()
 
 ```
@@ -539,9 +556,9 @@ The dependent variable (GPP) is non-negative and variance tends to increase with
 the mean. A Gamma distribution with a log link may therefore be appropriate
 for modelling these data.
 
-I also include a smooth function of latitude and longitude
-s(x,y) to include spatial relationships and spatially correlated errors not
-accounted for by other covariates.
+We also include a smooth function of latitude and longitude s(x,y) to include
+spatial relationships and spatially correlated errors not accounted for by other
+covariates.
 
 To prepare for GAM modelling, we select only covariates retained from correlation
 analysis above.
@@ -558,10 +575,10 @@ df_model <- df %>%
          map = map * 0.001,
          cv = cv * 0.01)
 
-# Write sample CSV for review
+# Write intermediate CSV for modelling
 
-write_csv(df_model, "processed_data/csv/gpp_precip/africa_sample_df_model.csv")
-df_model <- read_csv("processed_data/csv/gpp_precip/africa_sample_df_model.csv")
+# write_csv(df_model, "processed_data/csv/gpp_precip/africa_sample_df_model.csv")
+# df_model <- read_csv("processed_data/csv/gpp_precip/africa_sample_df_model.csv")
 
 ```
 
@@ -569,34 +586,31 @@ Non-spatial model including all covariates
 
 ```{r gam_1, cache = F, dependson = c("load", "mask", "to_df", "gam_prep")}
 
-mod1 <- readRDS("processed_data/models/mod1.rds")
+t1 <- Sys.time()
+mod1 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
+              s(ugi, k = 8, bs = "ts") +
+              s(season, k = 12, bs = "ts") + s(onset_sd, k = 8, bs = "ts") +
+              s(wet95, k = 6, bs = "ts") + s(intensity, k = 8, bs = "ts") +
+              s(soilN, k = 8, bs = "ts") + s(sand, k = 6, bs = "ts") +
+              s(lst_mean, k = 8, bs = "ts") +
+              s(meanT, k = 8, bs = "ts") +
+              s(fire, k = 8, bs = "ts"),
+            data = df_model,
+            method = "REML",
+            family = Gamma(link = "log"),
+            select = TRUE,
+            cluster = nc)
+t2 <- Sys.time()
+t2 - t1
 
-# t1 <- Sys.time()
-# mod1 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
-#               s(ugi, k = 8, bs = "ts") +
-#               s(season, k = 12, bs = "ts") + s(onset_sd, k = 8, bs = "ts") +
-#               s(wet95, k = 6, bs = "ts") + s(intensity, k = 8, bs = "ts") +
-#               s(soilN, k = 8, bs = "ts") + s(sand, k = 6, bs = "ts") +
-#               s(lst_mean, k = 8, bs = "ts") +
-#               s(meanT, k = 8, bs = "ts") +
-#               s(fire, k = 8, bs = "ts"),
-#             data = df_model,
-#             method = "REML",
-#             family = Gamma(link = "log"),
-#             select = TRUE,
-#             cluster = nc)
-# t2 <- Sys.time()
-# t2 - t1
-
-# Save model results
-
+# # Save/load model results
 # saveRDS(mod1, "processed_data/models/mod1.rds")
+# mod1 <- readRDS("processed_data/models/mod1.rds")
 
 # Model 1 results
 summary(mod1)
 plot(mod1, shade = TRUE, seWithMean = TRUE, scheme = 2,
      shift = coef(mod1)[1], pages = 2)
-appraise(mod1, n_bins = 60, point_alpha = 0.2)
 gam.check(mod1)
 
 # concurvity(mod1)
@@ -638,7 +652,7 @@ mod2_k8 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
 t2 <- Sys.time()
 t2 - t1
 
-# beep(5)
+beep(5)
 
 # Spatial model - medium smoothing (k = c(12,12) for spatial term)
 Sys.time()
@@ -660,7 +674,7 @@ mod2_k12 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
 t2 <- Sys.time()
 t2 - t1
 
-# beep(5)
+beep(5)
 
 # Spatial model - low smoothing (k = c(16,16) for spatial term)
 
@@ -685,11 +699,14 @@ t2 - t1
 
 beep(3)
 
-# Save model results
+# # Save/load model results
 
-saveRDS(mod2_k8, "processed_data/models/mod2_k8.rds")
-saveRDS(mod2_k12, "processed_data/models/mod2_k12.rds")
-saveRDS(mod2_k16, "processed_data/models/mod2_k16.rds")
+# saveRDS(mod2_k8, "processed_data/models/mod2_k8.rds")
+# saveRDS(mod2_k12, "processed_data/models/mod2_k12.rds")
+# saveRDS(mod2_k16, "processed_data/models/mod2_k16.rds")
+# mod2_k8 <- readRDS("processed_data/models/mod2_k8.rds")
+# mod2_k12 <- readRDS("processed_data/models/mod2_k12.rds")
+# mod2_k16 <- readRDS("processed_data/models/mod2_k16.rds")
 
 # Model 2 results
 
@@ -711,22 +728,22 @@ gam.check(mod2_k16)
 beep(3)
 
 ```
-The spatial models have an improved fit, with 94-96% deviance explained and a
-relatively symmetrical distribution of residuals. There is still a cloud of
-anomalously high values (potentially irrigated agriculture, river regions etc.)
-but they are a very small fraction of the dataset.
 
-The spatial term still shows an extremely low range of values in the Western
-Sahel that is unexplained by other terms. 
+The spatial models have an improved fit, with 94-96% deviance explained and a
+relatively symmetrical distribution of residuals (with some outliers).
 
 
 # Plot GAM results
 
 ```{r term_plots}
 
+# Set plot output directory
+
+plot_dir <- "figures/"
+
 theme_set(theme_classic())
 
-# Plot main GAM partial effect plots
+## Main GAM partial effect plots
 
 # Extract smooth shapes as data frame using gratia
 
@@ -760,9 +777,9 @@ mod_smooths <- bind_rows(mod1_smooths,
                          mod2_k12_smooths,
                          mod2_k16_smooths)
 
-# Read in data labels
+# Read in data labels lookup table
 
-var_labels <- read_csv("figures/paper_1_plots/var_labels.csv")
+var_labels <- read_csv("csv/var_labels.csv")
 
 var_list <- var_labels$vars
 
@@ -820,7 +837,9 @@ plots <- map(var_list, function(var) {
 # Create main GAM figure
 gam_plot <- ggarrange(plotlist = plots, ncol = 3, nrow = 4, common.legend = TRUE)
 
-ggsave("figures/paper_1_plots/main_gam_plot.jpg", plot = gam_plot,
+# Save spatial term map (CHOOSE DIRECTORY PATH)
+ggsave(paste0(plot_dir, "main_gam_plot.jpg"),
+       plot = gam_plot,
        width = 20, height = 30, units = "cm", dpi = 300)
 
 # Create map of spatial term for low smoothing spatial model
@@ -862,9 +881,9 @@ rast_plot <- tm_shape(spatial_rast) +
   sa_basemap_2 +
   africa_basemap
 
-rast_plot
-
-tmap_save(rast_plot, "figures/paper_1_plots/spatial_term.jpg",
+# Save spatial term map
+tmap_save(rast_plot,
+          paste0(plot_dir, "spatial_term.jpg"),
           width = 16, height = 12, units = "cm", dpi = 300)
 
 
@@ -878,17 +897,23 @@ Model diagnostic and residual plots
 # Model diagnostic plots
 
 mod1_diag <- appraise(mod1, n_bins = 60, point_alpha = 0.05, line_col = "#888888")
-ggsave("figures/paper_1_plots/mod1_diag_plot.jpg", plot = mod1_diag,
+ggsave(paste0(plot_dir, "mod1_diag_plot.jpg"),
+       plot = mod1_diag,
        width = 20, height = 16, units = "cm", dpi = 300)
 
 mod2_k8_diag <- appraise(mod2_k8, n_bins = 60, point_alpha = 0.05, line_col = "#117733")
-ggsave("figures/paper_1_plots/mod2_k8_diag_plot.jpg", plot = mod2_k8_diag,
+ggsave(paste0(plot_dir, "mod2_k8_diag_plot.jpg"),
+       plot = mod2_k8_diag,
        width = 20, height = 16, units = "cm", dpi = 300)
+
 mod2_k12_diag <- appraise(mod2_k8, n_bins = 60, point_alpha = 0.05, line_col = "#117733")
-ggsave("figures/paper_1_plots/mod2_k12_diag_plot.jpg", plot = mod2_k12_diag,
+ggsave(paste0(plot_dir, "mod2_k12_diag_plot.jpg"),
+       plot = mod2_k12_diag,
        width = 20, height = 16, units = "cm", dpi = 300)
+
 mod2_k16_diag <- appraise(mod2_k8, n_bins = 60, point_alpha = 0.05, line_col = "#117733")
-ggsave("figures/paper_1_plots/mod2_k16_diag_plot.jpg", plot = mod2_k16_diag,
+ggsave(paste0(plot_dir, "mod2_k16_diag_plot.jpg"),
+       plot = mod2_k16_diag,
        width = 20, height = 16, units = "cm", dpi = 300)
 
 # Residual map
@@ -904,7 +929,8 @@ resid_plot <- tm_shape(resid_raster) +
   sa_basemap_2 +
   africa_basemap
 
-tmap_save(resid_plot, "figures/paper_1_plots/mod2_resid_map.jpg",
+tmap_save(resid_plot,
+          paste0(plot_dir, "mod2_resid_map.jpg"),
           width = 16, height = 12, unit = "cm", dpi = 300)
 
 ```
