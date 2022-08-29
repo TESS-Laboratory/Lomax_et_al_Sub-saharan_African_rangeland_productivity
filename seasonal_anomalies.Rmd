@@ -1,12 +1,14 @@
 ---
 title: "Changes in Africa's seasonal onset and cessation dates"
+author: "Guy Lomax"
+date: "2022-08-29"
 output: html_notebook
-date: "2022-03-02"
 
 ---
 
-This notebook will explore annual anomalies in rainy season start and end dates
-across Africa and derive relevant statistics describing these anomalies.
+This notebook processes data on wet season length, onset dates and cessation dates
+and exports clean raster layers of wet season length, season length SD and onset
+date SD for sub-Saharan Africa.
 
 ```{r setup, message = FALSE}
 options(repos = c(CRAN = "https://cran.rstudio.org"))
@@ -20,6 +22,7 @@ library(tmap)
 ```
 
 Import data:
+
 ```{r data}
 
 # Season length raster (single and double seasons)
@@ -88,16 +91,7 @@ seasonal_anomalies_d <- mask_function(seasonal_anomalies_d, TRUE)
 
 ```
 
-Explore data and identify issues/errors.
-
-For double seasons, it looks like there are quite a few pixels where the onset
-or cesation date is either close to zero, or 307. I think these correspond to
-pixels and seasons where the onset (or cessation??) was not found in the window.
-
-I need to (a) map these pixels, (b) work out how many there are and whether I
-can safely remove them from the sample, (c) check if the seasons/pixels with
-a missed onset are the same as those with a missed cessation, and (d) decide
-whether I need to change my method to reduce these issues.
+Explore data and identify issues/errors:
 
 
 ```{r eda, eval = FALSE}
@@ -158,7 +152,7 @@ lines(africa)
 ```
 
 Remove pixels/seasons where onset/cessation dates have not been properly
-identified.
+identified:
 
 ```{r date_anomaly_pre_processing}
 
@@ -218,21 +212,9 @@ cessation_dates_d <- season_dates_d[[grepl("cessation", names(season_dates_d))]]
 # summary(cessation_anomalies_d_masked)
 
 ```
-After masking, we can calculate key long-term metrics and combine single and
-double into a single layer.
 
-I am unsure whether it makes more sense to use the seasonal rainfall average
-for finding double season lengths, or the annual rainfall average. The seasonal
-average is more sensitive, but could lead to erroneously high values of total
-season length if one season has very low rainfall, when compared to the single
-season case. For example, a double season pixel in which one season almost
-completely failed could still have a long season length in this method. I should
-plot the season lengths with both methods and see what looks more reasonable.
-
-If not, I'll need to find a way to mark undetected seasons as failed, and not
-simply detect them as usual. On the other hand, very erratic seasons (without a
-max/min in the period) would already give NA values in the season length layer,
-thereby contributing to higher season length CV.
+After masking, calculate key long-term metrics and combine single and double
+into a single layer:
 
 ```{r seasonal_metrics}
 
@@ -271,7 +253,8 @@ plot(season_length_sd); lines(africa)
 plot(season_onset_sd); lines(africa)
 
 ```
-Export data
+
+Export data:
 
 ```{r export}
 

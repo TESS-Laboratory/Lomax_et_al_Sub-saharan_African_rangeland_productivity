@@ -2,22 +2,18 @@
 title: Understanding the influence of precipitation timing and variability on dryland
   GPP
 author: "Guy Lomax"
-date: '2022-04-06'
-output:
-  html_document:
-    df_print: paged
-    toc: true
-    theme: united
+date: '2022-08-29'
+output: html_notebook
 ---
 
-This analysis aims to use Generalised Additive Models (GAMs) to explore the
+This analysis uses Generalised Additive Models (GAMs) to explore the
 relationship between different dimensions of precipitation variability and
 vegetation productivity across African rangelands. The notebook calculates
 mean values of different metrics of precipitation patterns and for gross primary
-productivity for 2001-2019, along with a few other covariates, for each pixel
-in a "rangeland" land cover class in Sub-Saharan Africa. A series of GAMs are
-then constructed to identify relationships between these covariates and mean
-annual gross primary productivity (GPP).
+productivity for 2001-2019, along with a few other covariates, for each
+rangeland pixel in Sub-Saharan Africa. A series of GAMs is then constructed to
+identify relationships between these covariates and mean annual gross primary
+productivity (GPP).
 
 GPP data are from PML_V2 dataset (Gan et al., 2018; Zhang et al., 2019) at 8-day
 temporal and 500m spatial resolution.
