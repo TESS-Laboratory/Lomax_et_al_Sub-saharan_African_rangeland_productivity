@@ -3,7 +3,7 @@ This repository contains R Markdown Notebooks and Google Earth Engine scripts fo
 
 Publication doi: 
 
-Repository doi: https://doi.org/10.5281/zenodo.7024962
+Repository doi: https://doi.org/10.5281/zenodo.7024961
 
 Contact: G.Lomax@exeter.ac.uk
 
