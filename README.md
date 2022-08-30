@@ -3,6 +3,8 @@ This repository contains R Markdown Notebooks and Google Earth Engine scripts fo
 
 Publication doi: 
 
+Repository doi: https://doi.org/10.5281/zenodo.7024962
+
 Contact: G.Lomax@exeter.ac.uk
 
 The code analyses the following datasets for the time period 2001-2019:
