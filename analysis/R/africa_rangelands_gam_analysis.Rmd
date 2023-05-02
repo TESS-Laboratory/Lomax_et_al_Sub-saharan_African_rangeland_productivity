@@ -24,12 +24,6 @@ are calculated as the mean value of 2001-2019 annual values.
 
 ```{r setup, include=FALSE}
 
-options(repos = c(CRAN = "https://cran.rstudio.org"))
-.libPaths("C:/Program Files/Microsoft/R Open/R-4.0.2/library")
-
-# SET DIRECTORY TO SAVE FIGURES
-plot_dir <- "figures/"
-
 library(tidyverse)
 library(terra)
 library(sf)
@@ -40,17 +34,17 @@ library(gratia)
 library(ggpubr)
 library(patchwork)
 library(beepr)
+library(here)
 
-terraOptions(tempdir = "processed_data/temp/terra",
+terraOptions(tempdir = here("data", "temp", "terra"),
              memfrac = 0.8)
+
+# Directory to save figures
+plot_dir <- here("results", "figures")
 
 ggplot2::theme_set(theme_bw())
 
 tmap_options(check.and.fix = TRUE)
-
-knitr::opts_chunk$set(echo = TRUE,
-                      message = FALSE,
-                      warning = FALSE)
 
 nc <- 6 # number of cores
 cl <- makeCluster(nc)
@@ -64,71 +58,74 @@ using Google Earth Engine.
 
 ```{r load_data, results = "hide", include = FALSE}
 
-## EDIT FILE PATHS TO RELEVANT DIRECTORIES
-
 # Africa country boundaries (Natural Earth dataset)
-countries <- st_read("raw_data/vector/natural_earth/ne_110m_admin_0_countries_fixed.shp")
+countries <- st_read(here("data", "raw_data", "vector", "natural_earth", 
+                          "ne_110m_admin_0_countries_fixed.shp"))
 africa <- filter(countries, CONTINENT == "Africa")
 africa_vct <- vect(africa)
 
 # PML_V2 multi-annual mean GPP values 
 # Convert GPP to raw units (scale by 0.01)
-gpp_mean <- rast("raw_data/raster/PML_V2/pmlv2_gpp_mean.tif") * 0.01
+gpp_mean <- rast(here("data", "raw_data", "raster", "PML_V2", 
+                      "pmlv2_gpp_mean.tif")) * 0.01
 
 # CHIRPS precipitation variables
-map <- rast("raw_data/raster/CHIRPS/chirps_MAP.tif")
-cv <- rast("raw_data/raster/CHIRPS/chirps_annual_CV.tif")
-intensity <- rast("raw_data/raster/CHIRPS/chirps_intensity.tif")
-dry <- rast("raw_data/raster/CHIRPS/chirps_dry_days.tif")
-ugi <- rast("raw_data/raster/CHIRPS/chirps_UGi.tif")
-pci <- rast("raw_data/raster/CHIRPS/chirps_PCI.tif")
-pc_95 <- rast("raw_data/raster/CHIRPS/chirps_95pc.tif")
-wet_95 <- rast("raw_data/raster/CHIRPS/chirps_wet_95pc.tif")
-gt10 <- rast("raw_data/raster/CHIRPS/chirps_exceed_10.tif")
-gt20 <- rast("raw_data/raster/CHIRPS/chirps_exceed_20.tif")
-gt30 <- rast("raw_data/raster/CHIRPS/chirps_exceed_30.tif")
+map <- rast(here("data", "raw_data", "raster", "CHIRPS", "chirps_MAP.tif"))
+cv <- rast(here("data", "raw_data", "raster", "CHIRPS", "chirps_annual_CV.tif"))
+intensity <- rast(here("data", "raw_data", "raster", "CHIRPS", "chirps_intensity.tif"))
+dry <- rast(here("data", "raw_data", "raster", "CHIRPS", "chirps_dry_days.tif"))
+ugi <- rast(here("data", "raw_data", "raster", "CHIRPS", "chirps_UGi.tif"))
+pci <- rast(here("data", "raw_data", "raster", "CHIRPS", "chirps_PCI.tif"))
+pc_95 <- rast(here("data", "raw_data", "raster", "CHIRPS", "chirps_95pc.tif"))
+wet_95 <- rast(here("data", "raw_data", "raster", "CHIRPS", "chirps_wet_95pc.tif"))
+gt10 <- rast(here("data", "raw_data", "raster", "CHIRPS", "chirps_exceed_10.tif"))
+gt20 <- rast(here("data", "raw_data", "raster", "CHIRPS", "chirps_exceed_20.tif"))
+gt30 <- rast(here("data", "raw_data", "raster", "CHIRPS", "chirps_exceed_30.tif"))
 
 # CHIRPS season length and onset data 
-season_length <- rast("processed_data/raster/seasonality/season_length.tif")
-season_length_sd <- rast("processed_data/raster/seasonality/season_length_sd.tif")
-season_onset_sd <- rast("processed_data/raster/seasonality/season_onset_sd.tif")
+season_length <- rast(here("data", "processed_data", "raster", "seasonality",
+                           "season_length.tif"))
+season_length_sd <- rast(here("data", "processed_data", "raster", "seasonality",
+                              "season_length_sd.tif"))
+season_onset_sd <- rast(here("data", "processed_data", "raster", "seasonality",
+                             "season_onset_sd.tif"))
 
 # ERA5-Land mean air temperature
-meanT <- rast("raw_data/raster/ERA5-Land/era5_T.tif")
+meanT <- rast(here("data", "raw_data", "raster", "ERA5-Land", "era5_T.tif"))
 
 meanT_resample <- disagg(meanT, 2, method = "bilinear")
 
 # MODIS mean daytime land surface temperature
-lst <- rast("raw_data/raster/MODIS/modis_lst.tif")
+lst <- rast(here("data", "raw_data", "raster", "MODIS", "modis_lst.tif"))
 
 # MODIS fire frequency 2001-2019
-fire <- rast("raw_data/raster/MODIS/modis_burn_freq.tif") %>%
+fire <- rast(here("data", "raw_data", "raster", "MODIS", "modis_burn_freq.tif")) %>%
   classify(matrix(c(NA, 0), nrow = 1))
 
 # iSDAsoil data (top 20cm)
-soil <- rast("raw_data/raster/iSDAsoil/isda_0_20_cm.tif") %>%
+soil <- rast(here("data", "raw_data", "raster", "iSDAsoil", "isda_0_20_cm.tif")) %>%
   crop(map) # Fixing error in extent from export
 names(soil) <- c("sand", "clay", "N", "P")
 
 # Mask layers
 # Aridity index
-ai <- rast("raw_data/raster/WorldClim/aridity.tif")
+ai <- rast(here("data", "raw_data", "raster", "WorldClim", "aridity.tif"))
 
 # MODIS land cover classification IGBP
-igbp <- rast("raw_data/raster/MODIS/IGBP_land_cover.tif")
+igbp <- rast(here("data", "raw_data", "raster", "MODIS", "IGBP_land_cover.tif"))
 
 # ESA WorldCover 10m land cover masks (2020)
 # Additional higher-resolution layers excluding urban, cropland and forested land
-esa_other <- rast("raw_data/raster/ESA/ESA_lc_frac.tif")
-esa_tree <- rast("raw_data/raster/ESA/ESA_tree_frac.tif")
+esa_other <- rast(here("data", "raw_data", "raster", "ESA", "ESA_lc_frac.tif"))
+esa_tree <- rast(here("data", "raw_data", "raster", "ESA", "ESA_tree_frac.tif"))
 
 # Zero mask (remove pixels where more than 25% of sub-pixels are zero for all
 # years in the dataset)
-zero_mask <- rast("raw_data/raster/PML_V2/pmlv2_zero_mask.tif")
+zero_mask <- rast(here("data", "raw_data", "raster", "PML_V2", "pmlv2_zero_mask.tif"))
 
 # CHIRPS seasonality ratio (for figures)
 # sr > 1 indicates multiple rainy seasons per year
-sr <- rast("raw_data/raster/chirps/seasonality_ratio.tif")
+sr <- rast(here("data", "raw_data", "raster", "chirps", "seasonality_ratio.tif"))
 
 ```
 
@@ -149,18 +146,19 @@ igbp_mask <- mask(igbp, africa_vct)
 
 # Most common assigned IGBP class
 
-getMode <- function(x) {
-keys <- na.omit(unique(x))
-keys[which.max(tabulate(match(x, keys)))]
-}
-
-igbp_mode <- app(igbp_mask, getMode)
-
-# # Write and read modal IGBP class layer (slow to calculate)
-# writeRaster(igbp_mode, "processed_data/raster/modis/igbp_mode.tif",
-#             overwrite = TRUE)
+# getMode <- function(x) {
+# keys <- na.omit(unique(x))
+# keys[which.max(tabulate(match(x, keys)))]
+# }
 # 
-# igbp_mode <- rast("processed_data/raster/modis/igbp_mode.tif")
+# igbp_mode <- app(igbp_mask, getMode)
+
+# Write and read modal IGBP class layer (slow to calculate)
+# writeRaster(igbp_mode, here("data", "processed_data", "raster", "modis",
+#                             "igbp_mode.tif"),
+#             overwrite = TRUE)
+
+igbp_mode <- rast(here("data", "processed_data", "raster", "modis", "igbp_mode.tif"))
 
 # Aridity index mask (include areas with 0.05 < ai > 0.65)
 ai_mask <- (ai > 500 & ai < 6500)
@@ -181,14 +179,15 @@ sa_mask <- function(spatRaster) {
 
 # Create stack of covariate rasters and mask to study region
 
-var_stack <- c(gpp_mean,
-               igbp_mode, soil, fire, meanT_resample, lst,
+var_stack <- c(igbp_mode,
+               gpp_mean,
+               soil, fire, meanT_resample, lst,
                map, cv, intensity, dry, ugi, pc_95, wet_95,
                gt10, gt20, gt30,
                pci, season_length, season_length_sd, season_onset_sd, sr[[3]])
 
-names(var_stack) <- c("gpp",
-                      "lc",
+names(var_stack) <- c("lc",
+                      "gpp",
                       "sand", "clay", "soilN", "soilP",
                       "fire", "meanT", "lst_mean",
                       "map", "cv", "intensity", "dry_days", "ugi",
@@ -326,14 +325,15 @@ p3 <- ggarrange(gpp_soilN, gpp_sand, gpp_T, gpp_lst, gpp_fire,
 
 # Save figures to directory
 
-ggsave(paste0(plot_dir, "p1.jpg"),
+ggsave(paste0(plot_dir, "/p1.png"),
        plot = p1,
        width = 16, height = 20, units = "cm", dpi = 300)
-ggsave(paste0(plot_dir, "p2.jpg"),
+ggsave(paste0(plot_dir, "/p2.png"),
        plot = p2,
        width = 16, height = 24, units = "cm", dpi = 300)
-ggsave(paste0(plot_dir, "p3.jpg"),
-       plot = p3, width = 16, height = 20, units = "cm", dpi = 300)
+ggsave(paste0(plot_dir, "/p3.png"),
+       plot = p3,
+       width = 16, height = 20, units = "cm", dpi = 300)
 
 ```
 
@@ -343,30 +343,45 @@ Exploratory maps of key covariates:
 
 ```{r eda_maps, eval = FALSE, echo = FALSE, results = "hide"}
 
+# Reproject to cylindrical equal area projection for maps
+
+proj_4 <- "+proj=cea +lat_ts=0.0 +lon_0=16.75 +x_0=0 +y_0=0 +datum=WGS84 +units=km +no_defs +type=crs"
+
+var_stack_reproject <- project(var_stack_masked[[2:24]], proj_4, method = "bilinear")
+
+lc_reproject <- project(var_stack_masked[[1]], proj_4, method = "near")
+
+var_stack_reproject <- c(var_stack_reproject, lc_reproject)
+
+africa_reproject <- st_transform(africa, proj_4)
+
+study_area_mask_reproject <- project(study_area_mask, proj_4, method = "near")
+
 # Create base map for all maps
-africa_basemap <- tm_shape(africa) + tm_borders() +
+africa_basemap <- tm_shape(africa_reproject) + tm_borders() +
   tm_layout(main.title.position = 0.1,
-            legend.position = c("left", "bottom"), legend.text.size = 0.7,
+            legend.position = c("left", "bottom"), legend.text.size = 0.5,
             legend.title.size = 0.85,
             legend.bg.color = "white", legend.bg.alpha = 0,
             legend.height = -0.4, legend.width = 0.6) +
-  tm_graticules(n.x = 6, n.y = 6, col = "grey", labels.size = 0.6)
+  tm_graticules(x = c(-15, 0, 15, 30, 45), y = c(-30, -15, 0, 15, 30),
+                col = "grey30", labels.size = 0.4, lwd = 0.75)
 
 # Create raster to mask excluded regions
-outside_sa <- mask(study_area_mask, study_area_mask, maskvalues = c(1, NA))
+outside_sa <- mask(study_area_mask_reproject, study_area_mask_reproject, maskvalues = c(1, NA))
 
 sa_basemap <- tm_shape(outside_sa) + 
-  tm_raster(col = "values", palette = "grey85", legend.show = FALSE)
+  tm_raster(palette = "grey85", legend.show = FALSE)
 
 # Study area map
-sa_map <- tm_shape(var_stack_masked[["lc"]]) +
+sa_map <- tm_shape(var_stack_reproject[["lc"]]) +
   tm_raster(style = "cat", palette = "Accent",
             labels = as.character(igbp_index$cover), title = "") +
   sa_basemap +
   africa_basemap
 
 # GPP across region
-gpp_map <- tm_shape(var_stack_masked[["gpp"]] %>% mask(africa_vct)) + 
+gpp_map <- tm_shape(var_stack_reproject[["gpp"]]) + 
   tm_raster(n = 9, palette = "YlGn", style = "cont", title = expression(GPP ~ (gC ~ m^-2 ~ yr^-1)),
             breaks = seq(0, 2500, 500)) +
   sa_basemap +
@@ -375,32 +390,32 @@ gpp_map <- tm_shape(var_stack_masked[["gpp"]] %>% mask(africa_vct)) +
 
 # Precipitation maps
 
-map_map <- tm_shape(var_stack_masked[["map"]]) +
+map_map <- tm_shape(var_stack_reproject[["map"]]) +
   tm_raster(style = "cont", palette = "YlGnBu", title = expression("MAP" ~ (mm ~ yr^-1)),
             breaks = seq(0, 1500, 300)) +
   sa_basemap +
   africa_basemap +
   tm_layout(main.title = "b)")
 
-cv_map <- tm_shape(var_stack_masked[["cv"]]) +
+cv_map <- tm_shape(var_stack_reproject[["cv"]]) +
   tm_raster(style = "cont", n = 10, palette = "RdPu", title = "CV of annual\nprecipitation (%)",
             breaks = seq(0, 50, 10)) +
   sa_basemap +
   africa_basemap
 
-intensity_map <- tm_shape(var_stack_masked[["intensity"]]) +
+intensity_map <- tm_shape(var_stack_reproject[["intensity"]]) +
   tm_raster(style = "cont", palette = "PRGn", title = expression(SDII ~ (mm ~ day^-1)),
             breaks = seq(0, 20, 4)) +
   sa_basemap +
   africa_basemap
 
-ugi_map <- tm_shape(var_stack_masked[["ugi"]]) +
+ugi_map <- tm_shape(var_stack_reproject[["ugi"]]) +
   tm_raster(style = "cont", n = 10, palette = "-PRGn", title = "UGi of daily\nprecipitation",
             breaks = seq(0.1, 0.5, 0.1), midpoint = 0.3) +
   sa_basemap +
   africa_basemap
 
-wet95_map <- tm_shape(var_stack_masked[["wet95"]]) +
+wet95_map <- tm_shape(var_stack_reproject[["wet95"]]) +
   tm_raster(style = "cont", n = 10, palette = "OrRd", title = "Fraction of precipitation\nover 95th percentile",
             breaks = seq(0, 0.25, 0.05)) +
   sa_basemap +
@@ -408,19 +423,19 @@ wet95_map <- tm_shape(var_stack_masked[["wet95"]]) +
 
 # Seasonality maps
 
-pci_map <- tm_shape(var_stack_masked[["pci"]]) +
+pci_map <- tm_shape(var_stack_reproject[["pci"]]) +
   tm_raster(style = "fixed", n = 10, palette = "Purples", title = "Precipitation concentration index",
             breaks = seq(0, 40, 5), midpoint = 20) +
   sa_basemap +
   africa_basemap
 
-season_map <- tm_shape(var_stack_masked[["season"]] %>% mask(var_stack_masked[["season"]] > 0, maskvalues = c(NA, 0))) +
+season_map <- tm_shape(var_stack_reproject[["season"]] %>% mask(var_stack_reproject[["season"]] > 0, maskvalues = c(NA, 0))) +
   tm_raster(style = "cont", palette = "RdYlBu", title = "Rainy season\nlength (days)",
             breaks = seq(50, 250, 50), midpoint = 150) +
   sa_basemap +
   africa_basemap
 
-onset_sd_map <- tm_shape(var_stack_masked[["onset_sd"]]) +
+onset_sd_map <- tm_shape(var_stack_reproject[["onset_sd"]]) +
   tm_raster(style = "cont", palette = "-RdYlBu", title = expression(sigma[onset] ~ (days)),
             breaks = seq(0, 50, 10)) +
   sa_basemap +
@@ -428,25 +443,25 @@ onset_sd_map <- tm_shape(var_stack_masked[["onset_sd"]]) +
 
 # Soil property maps
 
-soilN_map <- tm_shape(var_stack_masked[["soilN"]]) +
+soilN_map <- tm_shape(var_stack_reproject[["soilN"]]) +
   tm_raster(style = "cont", palette = "YlGn", title = expression(soilN ~ (g ~ kg^-1)),
             breaks = seq(0, 2, 0.4)) +
   sa_basemap +
   africa_basemap
 
-soilP_map <- tm_shape(var_stack_masked[["soilP"]]) +
+soilP_map <- tm_shape(var_stack_reproject[["soilP"]]) +
   tm_raster(style = "cont", palette = "YlGn", title = expression(soilP ~ (g ~ kg^-1)),
             breaks = seq(0, 20, 4)) +
   sa_basemap +
   africa_basemap
 
-sand_map <- tm_shape(var_stack_masked[["sand"]]) +
+sand_map <- tm_shape(var_stack_reproject[["sand"]]) +
   tm_raster(style = "cont", palette = "-BrBG", title = "Soil sand %",
             breaks = seq(0, 100, 20)) +
   sa_basemap +
   africa_basemap
 
-clay_map <- tm_shape(var_stack_masked[["clay"]]) +
+clay_map <- tm_shape(var_stack_reproject[["clay"]]) +
   tm_raster(style = "cont", palette = "-BrBG", title = "Soil clay %",
             breaks = seq(0, 100, 20)) +
   sa_basemap +
@@ -454,14 +469,14 @@ clay_map <- tm_shape(var_stack_masked[["clay"]]) +
 
 # Temperature maps
 
-T_map <- tm_shape(var_stack_masked[["meanT"]]) +
+T_map <- tm_shape(var_stack_reproject[["meanT"]]) +
   tm_raster(style = "cont", n = 10, palette = "-RdYlBu", title = "MAT (\u00B0C)",
             breaks = seq(10, 35, 5)) +
   sa_basemap +
   africa_basemap +
   tm_layout(main.title = "c)")
 
-lst_map <- tm_shape(var_stack_masked[["lst_mean"]]) +
+lst_map <- tm_shape(var_stack_reproject[["lst_mean"]]) +
   tm_raster(style = "cont", n = 10, palette = "-RdYlBu", title = "LST (\u00B0C)",
             breaks = seq(20, 45, 5)) +
   sa_basemap +
@@ -470,36 +485,40 @@ lst_map <- tm_shape(var_stack_masked[["lst_mean"]]) +
 
 # Fire frequency map
 
-fire_map <- tm_shape(var_stack_masked[["fire"]]) +
+fire_map <- tm_shape(var_stack_reproject[["fire"]]) +
   tm_raster(style = "cont", palette = "YlOrRd", title = expression(Fire ~ frequency ~ (yr^-1)),
             breaks = seq(0, 0.8, 0.2)) +
   sa_basemap +
   africa_basemap
 
-gpp_map
-map_map
-cv_map
-intensity_map
-ugi_map
-wet95_map
-pci_map
-season_map
-onset_sd_map
+# gpp_map
+# map_map
+# cv_map
+# intensity_map
+# ugi_map
+# wet95_map
+# pci_map
+# season_map
+# onset_sd_map
+# 
+# sand_map
+# clay_map
+# soilN_map
+# soilP_map
+# T_map
+# lst_map
 
-sand_map
-clay_map
-soilN_map
-soilP_map
-T_map
-lst_map
+# Save map figures to directory
 
-# Save map figure to directory
+tmap_save(sa_map,
+          paste0(plot_dir, "/sa_map_plot.png"),
+          width = 79, height = 70, units = "mm", dpi = 400)
 
 multi_plot <- tmap_arrange(gpp_map, map_map, T_map, lst_map)
 
 tmap_save(multi_plot,
-          paste0(plot_dir, "multi_map_plot.jpg"),
-          width = 20, height = 18, units = "cm", dpi = 200)
+          paste0(plot_dir, "/multi_map_plot.png"),
+          width = 168, height = 168, units = "mm", dpi = 400)
 
 ```
 
@@ -508,9 +527,9 @@ Calculate correlation matrix for all variables in dataset:
 ```{r correlation}
 
 cor_matrix = df %>%
-  select(gpp,map,cv,intensity,dry_days,ugi,pci,pc95,wet95,gt10,gt30,
+  dplyr::select(gpp,map,cv,intensity,dry_days,ugi,pci,pc95,wet95,gt10,gt30,
          season,onset_sd,sand,clay,soilN,soilP,meanT,lst_mean,fire) %>%
-  cor(method = "spearman")
+  cor(method = "spearman", use="pairwise.complete.obs")
 
 var_names <- c("GPP", "MAP", "CV", "SDII", "dry", "UGi", "PCI", ":F[95]",
                ":F['95w']", ":D['10mm']", ":D['30mm']", "season", ":sigma[onset]",
@@ -520,13 +539,13 @@ rownames(cor_matrix) <- var_names
 
 # Save correlation plot figure to directory
 
-jpeg(paste0(plot_dir, "cor_plot.jpg"),
+png(paste0(plot_dir, "/cor_plot.png"),
      height = 50, width = 50, units = "cm", res = 300)
 
 corrplot::corrplot(cor_matrix, method = "number", type = "upper",
                                tl.cex = 3, number.cex = 1.8, cl.cex = 2)
 
-dev.off()
+while (!is.null(dev.list()))  dev.off()
 
 ```
 
@@ -577,8 +596,9 @@ df_model <- df %>%
 
 # Write intermediate CSV for modelling
 
-# write_csv(df_model, "processed_data/csv/gpp_precip/africa_sample_df_model.csv")
-# df_model <- read_csv("processed_data/csv/gpp_precip/africa_sample_df_model.csv")
+# write_csv(df_model,
+#           here("data", "processed_data", "csv", "df_model.csv"))
+# df_model <- read_csv(here("data", "processed_data", "csv", "df_model.csv"))
 
 ```
 
