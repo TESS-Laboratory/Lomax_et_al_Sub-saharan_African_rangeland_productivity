@@ -1,5 +1,5 @@
-# Analysis code for "The mean is what matters: African rangeland productivity appears robust to the temporal distribution of precipitation"
-This repository contains R Markdown Notebooks and Google Earth Engine scripts for processing, visualising and analysing data presented in "The mean is what matters: African rangeland productivity appears robust to the temporal distribution of precipitation" by Guy Lomax, Andrew Cunliffe, Tom Powell, Theo Economou and Tim Lenton.
+# Analysis code for "Disentangling the environmental drivers of gross primary productivity in African rangelands"
+This repository contains R Markdown Notebooks and Google Earth Engine scripts for processing, visualising and analysing data presented in "Disentangling the environmental drivers of gross primary productivity in African rangelands" by Guy Lomax, Andrew Cunliffe, Tom Powell, Theo Economou and Tim Lenton.
 
 Publication doi: 
 
