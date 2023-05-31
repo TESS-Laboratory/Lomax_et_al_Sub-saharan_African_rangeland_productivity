@@ -9,7 +9,7 @@ var modis_lc = ee.ImageCollection("MODIS/006/MCD12Q1"),
 ////// Script to create study area mask based on land cover and aridity criteria //////
 ///////////////////////////////////////////////////////////////////////////////////////
 // Guy Lomax
-// 2022-04-02
+// 2022-05-31
 // G.Lomax@exeter.ac.uk
 // NB - Masks may run out of memory computing in Earth Engine interactive mode. Exports should complete successfully.
 /////////////////////////////////////////////////////////////
@@ -100,8 +100,8 @@ var igbp_lc_resample = igbp_lc
   .updateMask(igbp_all);
 Export.image.toDrive({
   image: igbp_lc_resample,
-  description: "IGBP_land_cover_chirps",
-  folder: "GEE Data",
+  description: "igbp_land_cover",
+  folder: "study_area_masks",
   scale: chirps_proj.scale,
   crs: chirps_proj.crs,
   crsTransform: chirps_proj.transform,
@@ -128,7 +128,7 @@ Map.addLayer(esa_lc_frac, {min: 0, max: 1, palette: ['#ffffb2','#fecc5c','#fd8d3
 Export.image.toDrive({
   image: esa_lc_frac,
   description: "esa_lc_frac",
-  folder: "GEE Data",
+  folder: "study_area_masks",
   region: africa_bbox,
   crs: chirps_proj.crs,
   crsTransform: chirps_proj.transform,
@@ -151,7 +151,7 @@ Map.addLayer(esa_tree_frac, {min: 0, max: 1, palette: ['#ffffb2','#fecc5c','#fd8
 Export.image.toDrive({
   image: esa_tree_frac,
   description: "esa_tree_frac",
-  folder: "GEE Data",
+  folder: "study_area_masks",
   region: africa_bbox,
   crs: chirps_proj.crs,
   crsTransform: chirps_proj.transform,
@@ -174,7 +174,7 @@ var ai_chirps = ai
 Export.image.toDrive({
   image: ai_chirps,
   description: "aridity",
-  folder: "GEE Data",
+  folder: "study_area_masks",
   region: africa_bbox,
   crs: chirps_proj.crs,
   crsTransform: chirps_proj.transform,
@@ -199,7 +199,7 @@ var pmlv2_zero_mask_resample = pmlv2_zero_mask
 Export.image.toDrive({
   image: pmlv2_zero_mask_resample,
   description: "pmlv2_zero_mask",
-  folder: "GEE Data",
+  folder: "study_area_masks",
   scale: chirps_proj.scale,
   crs: chirps_proj.crs,
   crsTransform: chirps_proj.transform,

@@ -14,8 +14,10 @@ var chirps = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY"),
 //////// based on CHIRPS daily precipitation data (2001-2019) //////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+Map.setCenter(20, 0, 3);
+
 //// Guy Lomax
-//// 2022-02-15
+//// 2022-05-31
 //// G.Lomax@exeter.ac.uk
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -129,7 +131,7 @@ Map.addLayer(
 Export.image.toDrive({
   image: seasonality_ratio_asset,
   description: "seasonality_ratio_to_drive",
-  folder: "GEE Data",
+  folder: "season_variables",
   fileNamePrefix: "seasonality_ratio",
   region: africa_bbox,
   crs: chirps_proj.crs,
@@ -502,7 +504,7 @@ Map.addLayer(
 Export.image.toDrive({
   image: season_length_all,
   description: "season_length_all_to_drive",
-  folder: "GEE Data",
+  folder: "season_variables",
   fileNamePrefix: "season_length_all",
   region: africa_bbox,
   crs: chirps_proj.crs,
@@ -668,8 +670,8 @@ print("Annual season dates - single", annual_dates_single);
 Export.image.toDrive({
   image: single_season_dates_annual.toInt(),
   description: "annual_dates_single_to_drive",
-  folder: "GEE Data",
-  fileNamePrefix: "annual_dates_single",
+  folder: "season_variables",
+  fileNamePrefix: "season_annual_dates_single",
   region: africa_bbox,
   crs: chirps_proj.crs,
   crsTransform: chirps_proj.transform,
@@ -876,8 +878,8 @@ var annual_dates_double_bands = annual_dates_double.toBands();
 Export.image.toDrive({
   image: double_season_dates_annual.toInt(),  /////////////////////////////////////////
   description: "annual_dates_double_to_drive",
-  folder: "GEE Data",
-  fileNamePrefix: "annual_dates_double",
+  folder: "season_variables",
+  fileNamePrefix: "season_annual_dates_double",
   region: africa_bbox,
   crs: chirps_proj.crs,
   crsTransform: chirps_proj.transform,
@@ -935,7 +937,7 @@ Map.addLayer(season_deviation_double, {min: -60, max: 60}, "Double season annual
 Export.image.toDrive({
   image: season_deviation_single,
   description: "season_deviation_single_to_drive",
-  folder: "GEE Data",
+  folder: "season_variables",
   fileNamePrefix: "season_deviation_single",
   region: africa_bbox,
   crs: chirps_proj.crs,
@@ -946,7 +948,7 @@ Export.image.toDrive({
 Export.image.toDrive({
   image: season_deviation_double,
   description: "season_deviation_double_to_drive",
-  folder: "GEE Data",
+  folder: "season_variables",
   fileNamePrefix: "season_deviation_double",
   region: africa_bbox,
   crs: chirps_proj.crs,

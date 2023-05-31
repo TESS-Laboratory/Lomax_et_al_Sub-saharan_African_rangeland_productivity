@@ -13,7 +13,7 @@ var chirps = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY"),
 //////// Script to calculate and export key non-seasonal variables for Africa rangeland GAM analysis //////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 //// Guy Lomax
-//// 2022-02-15
+//// 2023-05-31
 //// G.Lomax@exeter.ac.uk
 /////////////////////////////////////////////////////////////////////////////////////////
 ////// 1. Set geographic region and period for seasonal identification (2001-2019) //////
@@ -422,7 +422,7 @@ var isda_0_20_reproject = isda_0_20
 Export.image.toDrive({
   image: gpp_mean,
   description: "pmlv2_gpp_mean",
-  folder: "GEE Data",
+  folder: "main_variables",
   crs: chirps_proj.crs,
   crsTransform: chirps_proj.transform,
   region: africa_bbox,
@@ -432,7 +432,7 @@ Export.image.toDrive({
 Export.image.toDrive({
   image: map,
   description: "chirps_map",
-  folder: "GEE Data",
+  folder: "main_variables",
   crs: chirps_proj.crs,
   crsTransform: chirps_proj.transform,
   region: africa_bbox,
@@ -441,7 +441,7 @@ Export.image.toDrive({
 Export.image.toDrive({
   image: cv,
   description: "chirps_annual_cv",
-  folder: "GEE Data",
+  folder: "main_variables",
   crs: chirps_proj.crs,
   crsTransform: chirps_proj.transform,
   region: africa_bbox,
@@ -450,7 +450,7 @@ Export.image.toDrive({
 Export.image.toDrive({
   image: dry_days_mean,
   description: "chirps_dry_days",
-  folder: "GEE Data",
+  folder: "main_variables",
   crs: chirps_proj.crs,
   crsTransform: chirps_proj.transform,
   region: africa_bbox,
@@ -459,7 +459,7 @@ Export.image.toDrive({
 Export.image.toDrive({
   image: intensity_mean,
   description: "chirps_intensity",
-  folder: "GEE Data",
+  folder: "main_variables",
   crs: chirps_proj.crs,
   crsTransform: chirps_proj.transform,
   region: africa_bbox,
@@ -468,7 +468,7 @@ Export.image.toDrive({
 Export.image.toDrive({
   image: chirps_exceed_threshold,
   description: "chirps_exceed_" + threshold.toString(),
-  folder: "GEE Data",
+  folder: "main_variables",
   crs: chirps_proj.crs,
   crsTransform: chirps_proj.transform,
   region: africa_bbox,
@@ -477,7 +477,7 @@ Export.image.toDrive({
 Export.image.toDrive({
   image: mean_percentile_fraction,
   description: "chirps_95pc",
-  folder: "GEE Data",
+  folder: "main_variables",
   crs: chirps_proj.crs,
   crsTransform: chirps_proj.transform,
   region: africa_bbox,
@@ -486,7 +486,7 @@ Export.image.toDrive({
 Export.image.toDrive({
   image: mean_wet_percentile_fraction,
   description: "chirps_wet_95pc",
-  folder: "GEE Data",
+  folder: "main_variables",
   crs: chirps_proj.crs,
   crsTransform: chirps_proj.transform,
   region: africa_bbox,
@@ -495,7 +495,7 @@ Export.image.toDrive({
 Export.image.toDrive({
   image: ugi_mean,
   description: "chirps_ugi",
-  folder: "GEE Data",
+  folder: "main_variables",
   crs: chirps_proj.crs,
   crsTransform: chirps_proj.transform,
   region: africa_bbox,
@@ -504,7 +504,7 @@ Export.image.toDrive({
 Export.image.toDrive({
   image: pci_mean,
   description: "chirps_pci",
-  folder: "GEE Data",
+  folder: "main_variables",
   crs: chirps_proj.crs,
   crsTransform: chirps_proj.transform,
   region: africa_bbox,
@@ -517,7 +517,7 @@ Export.image.toDrive({
 Export.image.toDrive({
   image: era5_T,
   description: "era5_T",
-  folder: "GEE Data",
+  folder: "main_variables",
   region: africa_bbox,
   crs: chirps_proj.crs,
   crsTransform: [0.1, 0, -180, 0, -0.1, 50],
@@ -527,7 +527,7 @@ Export.image.toDrive({
 Export.image.toDrive({
   image: modis_lst_resample,
   description: "modis_lst",
-  folder: "GEE Data",
+  folder: "main_variables",
   region: africa_bbox,
   crs: chirps_proj.crs,
   crsTransform: chirps_proj.transform,
@@ -537,7 +537,7 @@ Export.image.toDrive({
 Export.image.toDrive({
   image: modis_burn_freq_resample,
   description: "modis_burn_freq",
-  folder: "GEE Data",
+  folder: "main_variables",
   region: africa_bbox,
   crs: chirps_proj.crs,
   crsTransform: chirps_proj.transform,
@@ -547,7 +547,7 @@ Export.image.toDrive({
 Export.image.toDrive({
   image: isda_0_20_reproject,
   description: "isda_0_20_cm",
-  folder: "GEE Data",
+  folder: "main_variables",
   region: africa_bbox,
   crs: chirps_proj.crs,
   crsTransform: chirps_proj.transform,
