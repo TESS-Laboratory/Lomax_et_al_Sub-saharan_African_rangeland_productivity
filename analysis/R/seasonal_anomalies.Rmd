@@ -11,13 +11,12 @@ and exports clean raster layers of wet season length, season length SD and onset
 date SD for sub-Saharan Africa.
 
 ```{r setup, message = FALSE}
-options(repos = c(CRAN = "https://cran.rstudio.org"))
-.libPaths("C:/Program Files/Microsoft/R Open/R-4.0.2/library")
 
 library(tidyverse)
 library(terra)
 library(sf)
 library(tmap)
+library(here)
 
 ```
 
@@ -25,14 +24,15 @@ Import data:
 
 ```{r load_data}
 
-## EDIT FILE PATHS TO RELEVANT DIRECTORIES
-
 # Season length raster (single and double seasons)
-season_length <- rast("raw_data/raster/chirps/season_length_all.tif")
+season_length <- rast(here("data", "raw_data", "raster", "chirps",
+                           "season_length_all.tif"))
 
 # Seasonal rainfall annual dates and anomalies - single seasons
-season_dates_s <- rast("raw_data/raster/chirps/annual_dates_single.tif")
-seasonal_anomalies_s <- rast("raw_data/raster/chirps/season_deviation_single.tif")
+season_dates_s <- rast(here("data", "raw_data", "raster", "chirps",
+                            "annual_dates_single.tif"))
+seasonal_anomalies_s <- rast(here("data", "raw_data", "raster", "chirps",
+                                  "season_deviation_single.tif"))
 
 date_names <- c("onset_", "cessation_")
 year_names <- as.character(rep(2001:2019, each = 2))
@@ -43,8 +43,10 @@ names(season_dates_s) <- layer_names
 names(seasonal_anomalies_s) <- layer_names
 
 # Seasonal rainfall dates and anomalies - double seasons
-season_dates_d <- rast("raw_data/raster/chirps/annual_dates_double.tif")
-seasonal_anomalies_d <- rast("raw_data/raster/chirps/season_deviation_double.tif")
+season_dates_d <- rast(here("data", "raw_data", "raster", "chirps",
+                            "annual_dates_double.tif"))
+seasonal_anomalies_d <- rast(here("data", "raw_data", "raster", "chirps",
+                                  "season_deviation_double.tif"))
 
 date_names_d <- c("onset1_", "cessation1_", "onset2_", "cessation2_")
 year_names_d <- as.character(rep(2001:2019, each = 4))
@@ -56,11 +58,13 @@ names(seasonal_anomalies_d) <- layer_names_d
 
 # Seasonality ratio
 
-seasonality_ratio <- rast("raw_data/raster/chirps/seasonality_ratio.tif") %>%
+seasonality_ratio <- rast(here("data", "raw_data", "raster", "chirps",
+                               "seasonality_ratio.tif")) %>%
   subset("amplitude_ratio")
 
 # Africa country boundaries (Natural Earth dataset)
-africa <- st_read("raw_data/vector/natural_earth/ne_110m_admin_0_countries_fixed.shp") %>%
+africa <- st_read(here("data", "raw_data", "vector", "natural_earth",
+                       "ne_110m_admin_0_countries_fixed.shp")) %>%
   filter(CONTINENT == "Africa") %>%
   vect()
 
@@ -249,10 +253,6 @@ season_length_sd <- app(annual_length_all, fun = season_sd)
 season_onset_sd_s <- app(onset_anomalies_s_masked, fun = season_sd)
 season_onset_sd_d <- app(onset_anomalies_d_masked, fun = season_sd)
 season_onset_sd <- merge(season_onset_sd_s, season_onset_sd_d)
-
-# Plot
-plot(season_length_sd); lines(africa)
-plot(season_onset_sd); lines(africa)
 
 ```
 

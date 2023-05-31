@@ -639,6 +639,7 @@ gam.check(mod1)
 beep(3)
 
 ```
+
 This model greatly improves the overall fit. A remarkable 84% of deviance is
 explained by the model, and the structure of the residuals is slightly improved.
 All variables included have a significant effect, with the possible exception of
