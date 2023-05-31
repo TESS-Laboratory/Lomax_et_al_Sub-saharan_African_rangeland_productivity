@@ -1,8 +1,7 @@
 ---
-title: Understanding the influence of precipitation timing and variability on dryland
-  GPP
+title: Disentangling the environmental drivers of gross primary productivity in African rangelands - main analysis
 author: "Guy Lomax"
-date: '2022-08-29'
+date: '2023-05-31'
 output: html_notebook
 ---
 
@@ -59,73 +58,89 @@ using Google Earth Engine.
 ```{r load_data, results = "hide", include = FALSE}
 
 # Africa country boundaries (Natural Earth dataset)
-countries <- st_read(here("data", "raw_data", "vector", "natural_earth", 
+countries <- st_read(here("data", "raw_data", "vector", "natural_earth",
                           "ne_110m_admin_0_countries_fixed.shp"))
 africa <- filter(countries, CONTINENT == "Africa")
 africa_vct <- vect(africa)
 
 # PML_V2 multi-annual mean GPP values 
 # Convert GPP to raw units (scale by 0.01)
-gpp_mean <- rast(here("data", "raw_data", "raster", "PML_V2", 
+gpp_mean <- rast(here("data", "raw_data", "raster", "main_variables",
                       "pmlv2_gpp_mean.tif")) * 0.01
 
 # CHIRPS precipitation variables
-map <- rast(here("data", "raw_data", "raster", "CHIRPS", "chirps_MAP.tif"))
-cv <- rast(here("data", "raw_data", "raster", "CHIRPS", "chirps_annual_CV.tif"))
-intensity <- rast(here("data", "raw_data", "raster", "CHIRPS", "chirps_intensity.tif"))
-dry <- rast(here("data", "raw_data", "raster", "CHIRPS", "chirps_dry_days.tif"))
-ugi <- rast(here("data", "raw_data", "raster", "CHIRPS", "chirps_UGi.tif"))
-pci <- rast(here("data", "raw_data", "raster", "CHIRPS", "chirps_PCI.tif"))
-pc_95 <- rast(here("data", "raw_data", "raster", "CHIRPS", "chirps_95pc.tif"))
-wet_95 <- rast(here("data", "raw_data", "raster", "CHIRPS", "chirps_wet_95pc.tif"))
-gt10 <- rast(here("data", "raw_data", "raster", "CHIRPS", "chirps_exceed_10.tif"))
-gt20 <- rast(here("data", "raw_data", "raster", "CHIRPS", "chirps_exceed_20.tif"))
-gt30 <- rast(here("data", "raw_data", "raster", "CHIRPS", "chirps_exceed_30.tif"))
+map <- rast(here("data", "raw_data", "raster", "main_variables",
+                 "chirps_MAP.tif"))
+cv <- rast(here("data", "raw_data", "raster", "main_variables",
+                "chirps_annual_CV.tif"))
+intensity <- rast(here("data", "raw_data", "raster", "main_variables",
+                "chirps_intensity.tif"))
+dry <- rast(here("data", "raw_data", "raster", "main_variables",
+                "chirps_dry_days.tif"))
+ugi <- rast(here("data", "raw_data", "raster", "main_variables",
+                "chirps_UGi.tif"))
+pci <- rast(here("data", "raw_data", "raster", "main_variables",
+                "chirps_PCI.tif"))
+pc_95 <- rast(here("data", "raw_data", "raster", "main_variables",
+                "chirps_95pc.tif"))
+wet_95 <- rast(here("data", "raw_data", "raster", "main_variables",
+                "chirps_wet_95pc.tif"))
+gt10 <- rast(here("data", "raw_data", "raster", "main_variables",
+                "chirps_exceed_10.tif"))
+gt20 <- rast(here("data", "raw_data", "raster", "main_variables",
+                "chirps_exceed_20.tif"))
+gt30 <- rast(here("data", "raw_data", "raster", "main_variables",
+                "chirps_exceed_30.tif"))
 
 # CHIRPS season length and onset data 
-season_length <- rast(here("data", "processed_data", "raster", "seasonality",
-                           "season_length.tif"))
-season_length_sd <- rast(here("data", "processed_data", "raster", "seasonality",
+season_length <- rast(here("data", "raw_data", "raster", "season_variables",
+                           "season_length_all.tif"))
+season_length_sd <- rast(here("data", "processed_data", "raster",
                               "season_length_sd.tif"))
-season_onset_sd <- rast(here("data", "processed_data", "raster", "seasonality",
+season_onset_sd <- rast(here("data", "processed_data", "raster",
                              "season_onset_sd.tif"))
 
 # ERA5-Land mean air temperature
-meanT <- rast(here("data", "raw_data", "raster", "ERA5-Land", "era5_T.tif"))
+meanT <- rast(here("data", "raw_data", "raster", "main_variables", "era5_T.tif"))
 
 meanT_resample <- disagg(meanT, 2, method = "bilinear")
 
 # MODIS mean daytime land surface temperature
-lst <- rast(here("data", "raw_data", "raster", "MODIS", "modis_lst.tif"))
+lst <- rast(here("data", "raw_data", "raster", "main_variables", "modis_lst.tif"))
 
 # MODIS fire frequency 2001-2019
-fire <- rast(here("data", "raw_data", "raster", "MODIS", "modis_burn_freq.tif")) %>%
+fire <- rast(here("data", "raw_data", "raster", "main_variables", "modis_burn_freq.tif")) %>%
   classify(matrix(c(NA, 0), nrow = 1))
 
 # iSDAsoil data (top 20cm)
-soil <- rast(here("data", "raw_data", "raster", "iSDAsoil", "isda_0_20_cm.tif")) %>%
+soil <- rast(here("data", "raw_data", "raster", "main_variables", "isda_0_20_cm.tif")) %>%
   crop(map) # Fixing error in extent from export
 names(soil) <- c("sand", "clay", "N", "P")
 
 # Mask layers
 # Aridity index
-ai <- rast(here("data", "raw_data", "raster", "WorldClim", "aridity.tif"))
+ai <- rast(here("data", "raw_data", "raster", "study_area_masks",
+                "aridity.tif"))
 
 # MODIS land cover classification IGBP
-igbp <- rast(here("data", "raw_data", "raster", "MODIS", "IGBP_land_cover.tif"))
+igbp <- rast(here("data", "raw_data", "raster", "study_area_masks",
+                  "IGBP_land_cover.tif"))
 
 # ESA WorldCover 10m land cover masks (2020)
 # Additional higher-resolution layers excluding urban, cropland and forested land
-esa_other <- rast(here("data", "raw_data", "raster", "ESA", "ESA_lc_frac.tif"))
-esa_tree <- rast(here("data", "raw_data", "raster", "ESA", "ESA_tree_frac.tif"))
+esa_other <- rast(here("data", "raw_data", "raster", "study_area_masks",
+                  "esa_lc_frac.tif"))
+esa_tree <- rast(here("data", "raw_data", "raster", "study_area_masks",
+                  "esa_tree_frac.tif"))
 
 # Zero mask (remove pixels where more than 25% of sub-pixels are zero for all
 # years in the dataset)
-zero_mask <- rast(here("data", "raw_data", "raster", "PML_V2", "pmlv2_zero_mask.tif"))
+zero_mask <- rast(here("data", "raw_data", "raster", "study_area_masks",
+                       "pmlv2_zero_mask.tif"))
 
 # CHIRPS seasonality ratio (for figures)
 # sr > 1 indicates multiple rainy seasons per year
-sr <- rast(here("data", "raw_data", "raster", "chirps", "seasonality_ratio.tif"))
+sr <- rast(here("data", "raw_data", "raster", "season_variables", "seasonality_ratio.tif"))
 
 ```
 
@@ -146,19 +161,20 @@ igbp_mask <- mask(igbp, africa_vct)
 
 # Most common assigned IGBP class
 
-# getMode <- function(x) {
-# keys <- na.omit(unique(x))
-# keys[which.max(tabulate(match(x, keys)))]
-# }
-# 
-# igbp_mode <- app(igbp_mask, getMode)
+getMode <- function(x) {
+keys <- na.omit(unique(x))
+keys[which.max(tabulate(match(x, keys)))]
+}
+
+igbp_mode <- app(igbp_mask, getMode)
 
 # Write and read modal IGBP class layer (slow to calculate)
-# writeRaster(igbp_mode, here("data", "processed_data", "raster", "modis",
-#                             "igbp_mode.tif"),
-#             overwrite = TRUE)
+writeRaster(igbp_mode, here("data", "processed_data", "raster",
+                            "igbp_mode.tif"),
+            overwrite = TRUE)
 
-igbp_mode <- rast(here("data", "processed_data", "raster", "modis", "igbp_mode.tif"))
+igbp_mode <- rast(here("data", "processed_data", "raster",
+                       "igbp_mode.tif"))
 
 # Aridity index mask (include areas with 0.05 < ai > 0.65)
 ai_mask <- (ai > 500 & ai < 6500)

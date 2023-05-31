@@ -1,0 +1,13 @@
+vars,label,parse
+map,MAP ~ (mm ~ yr^-1),1
+meanT,Mean air temperature (°C),0
+lst_mean,Mean daytime LST (°C),0
+cv,Interannual CV,0
+season,Season length (d),0
+onset_sd,SD of season onset (d),0
+ugi,Unranked Gini index,0
+intensity,SDII ~ (mm ~ d^-1),1
+wet95,F['95w'],1
+soilN,Soil ~ nitrogen ~ (g ~ kg^-1),1
+sand,Soil sand fraction,0
+fire,Fire ~ frequency ~ (yr^-1),1

@@ -1,7 +1,7 @@
 ---
-title: "Changes in Africa's seasonal onset and cessation dates"
-author: "Guy Lomax"
-date: "2022-08-29"
+title: Disentangling the environmental drivers of gross primary productivity in African rangelands - Seasonal anomaly calculation
+author: Guy Lomax
+date: 2023-05-31
 output: html_notebook
 
 ---
@@ -25,13 +25,13 @@ Import data:
 ```{r load_data}
 
 # Season length raster (single and double seasons)
-season_length <- rast(here("data", "raw_data", "raster", "chirps",
+season_length <- rast(here("data", "raw_data", "raster", "season_variables",
                            "season_length_all.tif"))
 
 # Seasonal rainfall annual dates and anomalies - single seasons
-season_dates_s <- rast(here("data", "raw_data", "raster", "chirps",
-                            "annual_dates_single.tif"))
-seasonal_anomalies_s <- rast(here("data", "raw_data", "raster", "chirps",
+season_dates_s <- rast(here("data", "raw_data", "raster", "season_variables",
+                            "season_annual_dates_single.tif"))
+seasonal_anomalies_s <- rast(here("data", "raw_data", "raster", "season_variables",
                                   "season_deviation_single.tif"))
 
 date_names <- c("onset_", "cessation_")
@@ -43,9 +43,9 @@ names(season_dates_s) <- layer_names
 names(seasonal_anomalies_s) <- layer_names
 
 # Seasonal rainfall dates and anomalies - double seasons
-season_dates_d <- rast(here("data", "raw_data", "raster", "chirps",
-                            "annual_dates_double.tif"))
-seasonal_anomalies_d <- rast(here("data", "raw_data", "raster", "chirps",
+season_dates_d <- rast(here("data", "raw_data", "raster", "season_variables",
+                            "season_annual_dates_double.tif"))
+seasonal_anomalies_d <- rast(here("data", "raw_data", "raster", "season_variables",
                                   "season_deviation_double.tif"))
 
 date_names_d <- c("onset1_", "cessation1_", "onset2_", "cessation2_")
@@ -58,7 +58,7 @@ names(seasonal_anomalies_d) <- layer_names_d
 
 # Seasonality ratio
 
-seasonality_ratio <- rast(here("data", "raw_data", "raster", "chirps",
+seasonality_ratio <- rast(here("data", "raw_data", "raster", "season_variables",
                                "seasonality_ratio.tif")) %>%
   subset("amplitude_ratio")
 
@@ -261,9 +261,9 @@ Export data:
 ```{r export}
 
 # Export as data layers for use in modelling
-writeRaster(season_length_sd, "processed_data/raster/seasonality/season_length_sd.tif",
+writeRaster(season_length_sd, "processed_data/raster/season_length_sd.tif",
             overwrite = TRUE)
-writeRaster(season_onset_sd, "processed_data/raster/seasonality/season_onset_sd.tif",
+writeRaster(season_onset_sd, "processed_data/raster/season_onset_sd.tif",
             overwrite = TRUE)
 
 ```

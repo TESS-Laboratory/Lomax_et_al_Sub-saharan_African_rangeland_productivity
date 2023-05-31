@@ -38,8 +38,8 @@ vignettes/*.pdf
 # R Environment Variables
 .Renviron
 
-# Data
-/data/
+# HTML notebooks
+/analysis/R/*.html
 
 # Results and figures
 /results/
