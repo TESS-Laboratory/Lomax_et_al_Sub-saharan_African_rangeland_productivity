@@ -1,0 +1,911 @@
+---
+title: Disentangling the environmental drivers of gross primary productivity in African rangelands - annual analysis
+author: "Guy Lomax"
+date: '2023-10-09'
+output: html_notebook
+---
+
+This analysis uses Generalised Additive Models (GAMs) to explore the
+relationship between different dimensions of precipitation variability and
+vegetation productivity across African rangelands. This notebook models annually
+integrated gross primary productivity each year from 2001 to 2019 as a function of
+precipitation, temperature and other metrics for each rangeland pixel in Sub-
+Saharan Africa.
+
+GPP data are from PML_V2 dataset (Gan et al., 2018; Zhang et al., 2019) at 8-day
+temporal and 500m spatial resolution.
+Precipitation data are from CHIRPS (Funk et al., 2015) at daily temporal
+resolution and 0.05 degree spatial resolution.
+All analysis conducted at 0.05 degree spatial resolution. 
+
+```{r setup, include=FALSE}
+
+library(tidyverse)
+library(terra)
+library(sf)
+library(tmap)
+library(mgcv)
+library(parallel)
+library(gratia)
+library(ggpubr)
+library(patchwork)
+library(beepr)
+library(here)
+
+terraOptions(tempdir = here("data", "temp", "terra"),
+             memfrac = 0.8)
+
+# Directory to save figures
+plot_dir <- here("results", "figures")
+
+ggplot2::theme_set(theme_bw())
+
+tmap_options(check.and.fix = TRUE)
+
+# Parallelisation
+nc <- detectCores() - 2
+cl <- makeCluster(nc)
+
+```
+
+# Load and pre-process data
+
+Raster data layers prepared, cropped and aggregated to 0.05 deg resolution
+using Google Earth Engine.
+
+
+```{r load_data, results = "hide", include = FALSE}
+
+# Africa country boundaries (Natural Earth dataset)
+countries <- st_read(here("data", "raw_data", "vector", "natural_earth",
+                          "ne_110m_admin_0_countries_fixed.shp"))
+africa <- filter(countries, CONTINENT == "Africa")
+africa_vct <- vect(africa)
+
+# PML_V2 multi-annual mean GPP values 
+# Convert GPP to raw units (scale by 0.01)
+gpp <- rast(here("data", "raw_data", "raster", "annual_variables",
+                      "gppAnnualBandsExport.tif")) * 0.01
+
+# CHIRPS precipitation variables
+map <- rast(here("data", "raw_data", "raster", "main_variables",
+                 "chirps_MAP.tif"))
+precipitation_vars <- rast(here("data", "raw_data", "raster", "annual_variables",
+                                "pptAnnualVarsSsa.tif"))
+
+# CHIRPS annual season start and end dates 
+season_length <- rast(here("data", "raw_data", "raster", "season_variables",
+                           "season_length_all.tif"))
+season_length_sd <- rast(here("data", "processed_data", "raster",
+                              "season_length_sd.tif"))
+season_onset_sd <- rast(here("data", "processed_data", "raster",
+                             "season_onset_sd.tif"))
+
+# Temperature and fire occurrence
+non_precipitation_vars <- rast(here("data", "raw_data", "raster", "annual_variables",
+                                    "nonPptAnnualVarsSsa.tif"))
+
+# iSDAsoil data (top 20cm)
+soil <- rast(here("data", "raw_data", "raster", "main_variables", "isda_0_20_cm.tif")) %>%
+  crop(map) # Fixing error in extent from export
+names(soil) <- c("sand", "clay", "N", "P")
+
+# Mask layers
+# Aridity index
+ai <- rast(here("data", "raw_data", "raster", "study_area_masks",
+                "aridity.tif"))
+
+# MODIS land cover classification IGBP
+igbp <- rast(here("data", "raw_data", "raster", "study_area_masks",
+                  "IGBP_land_cover.tif"))
+
+# ESA WorldCover 10m land cover masks (2020)
+# Additional higher-resolution layers excluding urban, cropland and forested land
+esa_other <- rast(here("data", "raw_data", "raster", "study_area_masks",
+                  "esa_lc_frac.tif"))
+esa_tree <- rast(here("data", "raw_data", "raster", "study_area_masks",
+                  "esa_tree_frac.tif"))
+
+# Zero mask (remove pixels where more than 25% of sub-pixels are zero for all
+# years in the dataset)
+zero_mask <- rast(here("data", "raw_data", "raster", "study_area_masks",
+                       "pmlv2_zero_mask.tif"))
+
+# CHIRPS seasonality ratio (for figures)
+# sr > 1 indicates multiple rainy seasons per year
+sr <- rast(here("data", "raw_data", "raster", "season_variables", "seasonality_ratio.tif"))
+
+```
+
+
+Clip and mask data layers:
+
+```{r mask, include = FALSE}
+
+igbp_index <- tibble(lc = c(6, 7, 8, 9, 10),
+                     cover = factor(c("Closed shrublands",
+                                      "Open shrublands",
+                                      "Woody savannas",
+                                      "Open savannas",
+                                      "Grasslands")))
+
+# Mask IGBP layers to African continental boundaries
+igbp_mask <- mask(igbp, africa_vct)
+
+# Most common assigned IGBP class
+
+# getMode <- function(x) {
+# keys <- na.omit(unique(x))
+# keys[which.max(tabulate(match(x, keys)))]
+# }
+# 
+# igbp_mode <- app(igbp_mask, getMode)
+# 
+# # Write and read modal IGBP class layer (slow to calculate)
+# writeRaster(igbp_mode, here("data", "processed_data", "raster",
+#                             "igbp_mode.tif"),
+#             overwrite = TRUE)
+
+igbp_mode <- rast(here("data", "processed_data", "raster",
+                       "igbp_mode.tif"))
+
+# Aridity index mask (include areas with 0.05 < ai > 0.65)
+ai_mask <- (ai > 500 & ai < 6500)
+
+# ESA masks (exclude > 25% non-rangeland or > 50% tree cover)
+esa_mask <- (esa_other < 0.25) & (esa_tree < 0.5)
+
+# Combine masks
+study_area_mask <- igbp_mode & ai_mask & esa_mask & zero_mask
+
+# Crop extent of GPP raster (export issue)
+gpp <- crop(gpp, study_area_mask)
+
+# Study area mask function
+sa_mask <- function(spatRaster) {
+  masked <- spatRaster %>%
+    mask(study_area_mask, maskvalues = c(0, NA))
+  
+  masked
+}
+
+# Create stack of covariate rasters and mask to study region
+
+names(igbp_mode) <- "lc"
+names(esa_tree) <- "tree_frac"
+
+var_stack <- c(igbp_mode,
+               esa_tree,
+               gpp,
+               precipitation_vars,
+               non_precipitation_vars,
+               soil)
+
+var_stack_masked <- sa_mask(var_stack)
+
+```
+
+Convert whole raster to data frame
+
+```{r to_df, cache = F, dependson = c("load", "mask"), include = FALSE}
+
+df <- as.data.frame(var_stack_masked, xy = TRUE, cells = TRUE) %>%
+  left_join(igbp_index) %>%
+  pivot_longer(cols = starts_with(c("gpp", "ppt", "tMean", "modisBurn")),
+               names_to = "var_name", values_to = "value") %>%
+  separate_wider_delim(cols = "var_name", delim = "_", names = c("var", "year")) %>%
+  mutate(year = as.numeric(year)) %>%
+  pivot_wider(names_from = "var", values_from = "value") %>%
+  rename("burn" = "modisBurn")
+
+head(df)
+
+df_with_map <- df %>%
+  group_by(cell) %>%
+  mutate(pptMean = mean(pptTotal)) %>%
+  ungroup()
+```
+
+# Exploratory Data Analysis
+
+Plot histograms and scatter plots of key covariates.
+
+Variable definitions:
+
+|Variable name|Definition|Unit|Source dataset|
+|-------------|----------|----|--------------|
+|gpp|Gross Primary Productivity|gC m-2 yr-1|PML_V2|
+|-------------|----------|----|--------------|
+|map|Mean annual precipitation|mm yr-1|CHIRPS|
+|cv|Coefficient of variation of MAP|%|CHIRPS|
+|dry_days|Fraction of days per year with < 1mm precipitation|unitless 0-1|CHIRPS|
+|intensity|Mean intensity of rainfall on a rainy day|mm day-1|CHIRPS|
+|pc95|Fraction of daily rainfall above 95th percentile of all days|unitless 0-1|CHIRPS|
+|wet95|Fraction of daily rainfall above 95th percentile of wet days|unitless 0-1|CHIRPS|
+|gt10|Fraction of days per year with >10 mm rainfall|
+|gt20|Fraction of days per year with >20 mm rainfall|
+|gt30|Fraction of days per year with >30 mm rainfall|
+|ugi|Unranked Gini index of daily precipitation|unitless 0-1|CHIRPS|
+|pci|Precipitation concentration index|unitless 0-1|CHIRPS|
+|-------------|----------|----|
+|season|Average rainy season length|days|CHIRPS|
+|season_sd|Standard deviation of rainy season length|days|CHIRPS|
+|onset_sd|Standard deviation of rainy season onset|days|CHIRPS|
+|-------------|----------|----|
+|sand|Soil sand fraction 0-20cm|%|iSDAsoil|
+|clay|Soil clay fraction 0-20cm|%|iSDAsoil|
+|soilN|Soil nitrogen content 0-20cm|g/kg|iSDAsoil|
+|soilP|Soil extractable phosphorus 0-20cm|ppm|iSDAsoil|
+|meanT|Mean annual air temperature at 2m|degC|ERA5-Land|
+|lst_mean|Mean daily land surface temperature|degC|MODIS Terra|
+|fire|Mean fire frequency 2001-2019|yr-1|MODIS Terra|
+
+
+```{r eda, eval = FALSE, echo = FALSE}
+
+# Single variable plots
+
+ppt_var_names <- c("pptTotal", "pptAnomaly", "pptMeanDayAnomaly", "pptIntensity",
+               "pptGt95Pc", "pptUgi")
+non_ppt_var_names <- c("tMean", "burn", "sand", "clay", "N", "P")
+
+set.seed(123)
+plot_sample <- sample_n(df, 5000)
+
+# GPP histogram
+ggplot(plot_sample, aes(x = gpp)) +
+  geom_histogram(bins = 100, fill = "forestgreen", alpha = 0.8) +
+  theme_classic()
+
+# Precipitation var histograms
+plot_sample %>%
+  pivot_longer(cols = all_of(ppt_var_names)) %>%
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 100, fill = "cornflowerblue", alpha = 0.8) +
+  theme_classic() +
+  facet_wrap(~name, nrow = 2, scales = "free") +
+  labs(x = "Variable", y = "Count")
+
+# Other var histograms
+
+plot_sample %>%
+  pivot_longer(cols = all_of(non_ppt_var_names)) %>%
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 100, fill = "orange", alpha = 0.8) +
+  theme_classic() +
+  facet_wrap(~name, nrow = 2, scales = "free") +
+  labs(x = "Variable", y = "Count")
+
+# Two-variable plots
+# Sample to reduce display time
+
+base_plot <- ggplot(plot_sample,
+                    aes(fill = cover, colour = cover),
+                    alpha = 0.6
+                    ) +
+  theme(axis.text = element_text(size = 8), axis.title = element_text(size = 10),
+        legend.text = element_text(size = 10)) +
+  labs(fill = "", colour = "") +
+  theme_bw() +
+  guides(colour = guide_legend(override.aes = list(size = 2)))
+
+```
+
+
+Exploratory maps of key covariates:
+
+
+```{r eda_maps, eval = FALSE, echo = FALSE, results = "hide"}
+
+# Reproject to cylindrical equal area projection for maps
+
+proj_4 <- "+proj=cea +lat_ts=0.0 +lon_0=16.75 +x_0=0 +y_0=0 +datum=WGS84 +units=km +no_defs +type=crs"
+
+var_stack_reproject <- project(var_stack_masked[[2:24]], proj_4, method = "bilinear")
+
+lc_reproject <- project(var_stack_masked[[1]], proj_4, method = "near")
+
+var_stack_reproject <- c(var_stack_reproject, lc_reproject)
+
+africa_reproject <- st_transform(africa, proj_4)
+
+study_area_mask_reproject <- project(study_area_mask, proj_4, method = "near")
+
+# Create base map for all maps
+africa_basemap <- tm_shape(africa_reproject) + tm_borders() +
+  tm_layout(main.title.position = 0.1,
+            legend.position = c("left", "bottom"), legend.text.size = 0.5,
+            legend.title.size = 0.85,
+            legend.bg.color = "white", legend.bg.alpha = 0,
+            legend.height = -0.4, legend.width = 0.6) +
+  tm_graticules(x = c(-15, 0, 15, 30, 45), y = c(-30, -15, 0, 15, 30),
+                col = "grey30", labels.size = 0.4, lwd = 0.75)
+
+# Create raster to mask excluded regions
+outside_sa <- mask(study_area_mask_reproject, study_area_mask_reproject, maskvalues = c(1, NA))
+
+sa_basemap <- tm_shape(outside_sa) + 
+  tm_raster(palette = "grey85", legend.show = FALSE)
+
+# Study area map
+sa_map <- tm_shape(var_stack_reproject[["lc"]]) +
+  tm_raster(style = "cat", palette = "Accent",
+            labels = as.character(igbp_index$cover), title = "") +
+  sa_basemap +
+  africa_basemap
+
+# GPP across region
+gpp_map <- tm_shape(var_stack_reproject[["gpp"]]) + 
+  tm_raster(n = 9, palette = "YlGn", style = "cont", title = expression(GPP ~ (gC ~ m^-2 ~ yr^-1)),
+            breaks = seq(0, 2500, 500)) +
+  sa_basemap +
+  africa_basemap +
+  tm_layout(main.title = "a)")
+
+# Precipitation maps
+
+map_map <- tm_shape(var_stack_reproject[["map"]]) +
+  tm_raster(style = "cont", palette = "YlGnBu", title = expression("MAP" ~ (mm ~ yr^-1)),
+            breaks = seq(0, 1500, 300)) +
+  sa_basemap +
+  africa_basemap +
+  tm_layout(main.title = "b)")
+
+cv_map <- tm_shape(var_stack_reproject[["cv"]]) +
+  tm_raster(style = "cont", n = 10, palette = "RdPu", title = "CV of annual\nprecipitation (%)",
+            breaks = seq(0, 50, 10)) +
+  sa_basemap +
+  africa_basemap
+
+intensity_map <- tm_shape(var_stack_reproject[["intensity"]]) +
+  tm_raster(style = "cont", palette = "PRGn", title = expression(SDII ~ (mm ~ day^-1)),
+            breaks = seq(0, 20, 4)) +
+  sa_basemap +
+  africa_basemap
+
+ugi_map <- tm_shape(var_stack_reproject[["ugi"]]) +
+  tm_raster(style = "cont", n = 10, palette = "-PRGn", title = "UGi of daily\nprecipitation",
+            breaks = seq(0.1, 0.5, 0.1), midpoint = 0.3) +
+  sa_basemap +
+  africa_basemap
+
+wet95_map <- tm_shape(var_stack_reproject[["wet95"]]) +
+  tm_raster(style = "cont", n = 10, palette = "OrRd", title = "Fraction of precipitation\nover 95th percentile",
+            breaks = seq(0, 0.25, 0.05)) +
+  sa_basemap +
+  africa_basemap
+
+# Seasonality maps
+
+pci_map <- tm_shape(var_stack_reproject[["pci"]]) +
+  tm_raster(style = "fixed", n = 10, palette = "Purples", title = "Precipitation concentration index",
+            breaks = seq(0, 40, 5), midpoint = 20) +
+  sa_basemap +
+  africa_basemap
+
+season_map <- tm_shape(var_stack_reproject[["season"]] %>% mask(var_stack_reproject[["season"]] > 0, maskvalues = c(NA, 0))) +
+  tm_raster(style = "cont", palette = "RdYlBu", title = "Rainy season\nlength (days)",
+            breaks = seq(50, 250, 50), midpoint = 150) +
+  sa_basemap +
+  africa_basemap
+
+onset_sd_map <- tm_shape(var_stack_reproject[["onset_sd"]]) +
+  tm_raster(style = "cont", palette = "-RdYlBu", title = expression(sigma[onset] ~ (days)),
+            breaks = seq(0, 50, 10)) +
+  sa_basemap +
+  africa_basemap
+
+# Soil property maps
+
+soilN_map <- tm_shape(var_stack_reproject[["soilN"]]) +
+  tm_raster(style = "cont", palette = "YlGn", title = expression(soilN ~ (g ~ kg^-1)),
+            breaks = seq(0, 2, 0.4)) +
+  sa_basemap +
+  africa_basemap
+
+soilP_map <- tm_shape(var_stack_reproject[["soilP"]]) +
+  tm_raster(style = "cont", palette = "YlGn", title = expression(soilP ~ (g ~ kg^-1)),
+            breaks = seq(0, 20, 4)) +
+  sa_basemap +
+  africa_basemap
+
+sand_map <- tm_shape(var_stack_reproject[["sand"]]) +
+  tm_raster(style = "cont", palette = "-BrBG", title = "Soil sand %",
+            breaks = seq(0, 100, 20)) +
+  sa_basemap +
+  africa_basemap
+
+clay_map <- tm_shape(var_stack_reproject[["clay"]]) +
+  tm_raster(style = "cont", palette = "-BrBG", title = "Soil clay %",
+            breaks = seq(0, 100, 20)) +
+  sa_basemap +
+  africa_basemap
+
+# Temperature maps
+
+T_map <- tm_shape(var_stack_reproject[["meanT"]]) +
+  tm_raster(style = "cont", n = 10, palette = "-RdYlBu", title = "MAT (\u00B0C)",
+            breaks = seq(10, 35, 5)) +
+  sa_basemap +
+  africa_basemap +
+  tm_layout(main.title = "c)")
+
+lst_map <- tm_shape(var_stack_reproject[["lst_mean"]]) +
+  tm_raster(style = "cont", n = 10, palette = "-RdYlBu", title = "LST (\u00B0C)",
+            breaks = seq(20, 45, 5)) +
+  sa_basemap +
+  africa_basemap +
+  tm_layout(main.title = "d)")
+
+# Fire frequency map
+
+fire_map <- tm_shape(var_stack_reproject[["fire"]]) +
+  tm_raster(style = "cont", palette = "YlOrRd", title = expression(Fire ~ frequency ~ (yr^-1)),
+            breaks = seq(0, 0.8, 0.2)) +
+  sa_basemap +
+  africa_basemap
+
+# gpp_map
+# map_map
+# cv_map
+# intensity_map
+# ugi_map
+# wet95_map
+# pci_map
+# season_map
+# onset_sd_map
+# 
+# sand_map
+# clay_map
+# soilN_map
+# soilP_map
+# T_map
+# lst_map
+
+# Save map figures to directory
+
+tmap_save(sa_map,
+          paste0(plot_dir, "/sa_map_plot.png"),
+          width = 79, height = 70, units = "mm", dpi = 400)
+
+multi_plot <- tmap_arrange(gpp_map, map_map, T_map, lst_map)
+
+tmap_save(multi_plot,
+          paste0(plot_dir, "/multi_map_plot.png"),
+          width = 168, height = 168, units = "mm", dpi = 400)
+
+```
+
+Calculate correlation matrix for all variables in dataset:
+
+```{r correlation}
+
+cor_matrix = df %>%
+  dplyr::select(gpp, all_of(ppt_var_names), all_of(non_ppt_var_names)) %>%
+  cor(method = "spearman", use="pairwise.complete.obs")
+
+# var_names <- c("GPP", "MAP", "CV", "SDII", "dry", "UGi", "PCI", ":F[95]",
+#                ":F['95w']", ":D['10mm']", ":D['30mm']", "season", ":sigma[onset]",
+#                "sand", "clay", "soilN", "soilP", "meanT", "LST", "fire")
+# colnames(cor_matrix) <- var_names
+# rownames(cor_matrix) <- var_names
+
+# Save correlation plot figure to directory
+
+png(paste0(plot_dir, "/cor_plot_annual.png"),
+     height = 50, width = 50, units = "cm", res = 300)
+
+corrplot::corrplot(cor_matrix, method = "number", type = "upper",
+                               tl.cex = 3, number.cex = 1.8, cl.cex = 2)
+
+while (!is.null(dev.list()))  dev.off()
+
+```
+
+We remove covariates with > 0.7 Spearman's Rank correlation coefficient with
+other covariates, leaving the following:
+
+- MAP
+- CV
+- UGi
+- season
+- sigma_onset
+- SDII
+- F_95w
+- soilN
+- sand
+- meanT
+- LST
+- fire
+
+
+# GAMs
+
+We use GAMs to explore the relationships and interactions between
+rainfall dimensions, non-rainfall covariates and GPP.
+
+The dependent variable (GPP) is non-negative and variance tends to increase with
+the mean. A Gamma distribution with a log link may therefore be appropriate
+for modelling these data.
+
+We also include a smooth function of latitude and longitude s(x,y) to include
+spatial relationships and spatially correlated errors not accounted for by other
+covariates.
+
+To prepare for GAM modelling, we select only covariates retained from correlation
+analysis above.
+
+```{r gam_prep, cache = F, dependson = c("load", "mask", "to_df")}
+
+# Select model variables and scale some to more consistent units (0-1)
+df_model <- df %>%
+  dplyr::select(x, y, gpp, map, cv, ugi, season, onset_sd, intensity, wet95,
+                soilN, sand, meanT, lst_mean, fire)%>%
+  filter(season > 0) %>%    # Remove pixels with season length == 0 (errors)
+  mutate(gpp = gpp * 0.001,
+         sand = sand * 0.01,
+         map = map * 0.001,
+         cv = cv * 0.01)
+
+# Write intermediate CSV for modelling
+
+# write_csv(df_model,
+#           here("data", "processed_data", "csv", "df_model.csv"))
+# df_model <- read_csv(here("data", "processed_data", "csv", "df_model.csv"))
+
+```
+
+Non-spatial model including all covariates
+
+```{r gam_1, cache = F, dependson = c("load", "mask", "to_df", "gam_prep")}
+
+t1 <- Sys.time()
+mod1 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
+              s(ugi, k = 8, bs = "ts") +
+              s(season, k = 12, bs = "ts") + s(onset_sd, k = 8, bs = "ts") +
+              s(wet95, k = 6, bs = "ts") + s(intensity, k = 8, bs = "ts") +
+              s(soilN, k = 8, bs = "ts") + s(sand, k = 6, bs = "ts") +
+              s(lst_mean, k = 8, bs = "ts") +
+              s(meanT, k = 8, bs = "ts") +
+              s(fire, k = 8, bs = "ts"),
+            data = df_model,
+            method = "REML",
+            family = Gamma(link = "log"),
+            select = TRUE,
+            cluster = nc)
+t2 <- Sys.time()
+t2 - t1
+
+# # Save/load model results
+# saveRDS(mod1, "processed_data/models/mod1.rds")
+# mod1 <- readRDS("processed_data/models/mod1.rds")
+
+# Model 1 results
+summary(mod1)
+plot(mod1, shade = TRUE, seWithMean = TRUE, scheme = 2,
+     shift = coef(mod1)[1], pages = 2)
+gam.check(mod1)
+
+# concurvity(mod1)
+# (concurvity(mod1, full = FALSE)$estimate)
+
+beep(3)
+
+```
+
+This model greatly improves the overall fit. A remarkable 84% of deviance is
+explained by the model, and the structure of the residuals is slightly improved.
+All variables included have a significant effect, with the possible exception of
+F95w (extreme rainfall).
+
+Pairwise concurvity remains low, suggesting the variables are sufficiently
+independent.
+
+Now I add the spatial term to account for the spatial structure in the model
+residuals.
+
+```{r gam_2, cache = F, dependson = c("load", "mask", "to_df", "gam_prep")}
+
+# Spatial model - high smoothing (k = c(8,8) for spatial term)
+Sys.time()
+t1 <- Sys.time()
+mod2_k8 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
+              s(ugi, k = 8, bs = "ts") +
+              s(season, k = 12, bs = "ts") + s(onset_sd, k = 8, bs = "ts") +
+              s(wet95, k = 6, bs = "ts") + s(intensity, k = 8, bs = "ts") +
+              s(soilN, k = 8, bs = "ts") + s(sand, k = 6, bs = "ts") +
+              s(lst_mean, k = 8, bs = "ts") +
+              s(meanT, k = 8, bs = "ts") +
+              s(fire, k = 8, bs = "ts") +
+              te(x, y, k = c(8, 8), bs = "ts"),
+            data = df_model,
+            method = "REML",
+            family = Gamma(link = "log"),
+            select = TRUE,
+            cluster = nc)
+t2 <- Sys.time()
+t2 - t1
+
+beep(5)
+
+# Spatial model - medium smoothing (k = c(12,12) for spatial term)
+Sys.time()
+t1 <- Sys.time()
+mod2_k12 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
+              s(ugi, k = 8, bs = "ts") +
+              s(season, k = 12, bs = "ts") + s(onset_sd, k = 8, bs = "ts") +
+              s(wet95, k = 6, bs = "ts") + s(intensity, k = 8, bs = "ts") +
+              s(soilN, k = 8, bs = "ts") + s(sand, k = 6, bs = "ts") +
+              s(lst_mean, k = 8, bs = "ts") +
+              s(meanT, k = 8, bs = "ts") +
+              s(fire, k = 8, bs = "ts") +
+              te(x, y, k = c(12, 12), bs = "ts"),
+            data = df_model,
+            method = "REML",
+            family = Gamma(link = "log"),
+            select = TRUE,
+            cluster = nc)
+t2 <- Sys.time()
+t2 - t1
+
+beep(5)
+
+# Spatial model - low smoothing (k = c(16,16) for spatial term)
+
+Sys.time()
+t1 <- Sys.time()
+mod2_k16 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
+              s(ugi, k = 8, bs = "ts") +
+              s(season, k = 12, bs = "ts") + s(onset_sd, k = 8, bs = "ts") +
+              s(wet95, k = 6, bs = "ts") + s(intensity, k = 8, bs = "ts") +
+              s(soilN, k = 8, bs = "ts") + s(sand, k = 6, bs = "ts") +
+              s(lst_mean, k = 8, bs = "ts") +
+              s(meanT, k = 8, bs = "ts") +
+              s(fire, k = 8, bs = "ts") +
+              te(x, y, k = c(16, 16), bs = "ts"),
+            data = df_model,
+            method = "REML",
+            family = Gamma(link = "log"),
+            select = TRUE,
+            cluster = nc)
+t2 <- Sys.time()
+t2 - t1
+
+beep(3)
+
+# # Save/load model results
+
+# saveRDS(mod2_k8, "processed_data/models/mod2_k8.rds")
+# saveRDS(mod2_k12, "processed_data/models/mod2_k12.rds")
+# saveRDS(mod2_k16, "processed_data/models/mod2_k16.rds")
+# mod2_k8 <- readRDS("processed_data/models/mod2_k8.rds")
+# mod2_k12 <- readRDS("processed_data/models/mod2_k12.rds")
+# mod2_k16 <- readRDS("processed_data/models/mod2_k16.rds")
+
+# Model 2 results
+
+plot(mod2_k8, shade = TRUE, seWithMean = TRUE, scheme = 2,
+     pages = 3)
+plot(mod2_k12, shade = TRUE, seWithMean = TRUE, scheme = 2,
+     pages = 3)
+plot(mod2_k16, shade = TRUE, seWithMean = TRUE, scheme = 2,
+     pages = 3)
+
+print("Spatial term k = 8")
+gam.check(mod2_k8)
+print("Spatial term k = 12")
+gam.check(mod2_k12)
+print("Spatial term k = 16")
+gam.check(mod2_k16)
+
+
+beep(3)
+
+```
+
+The spatial models have an improved fit, with 94-96% deviance explained and a
+relatively symmetrical distribution of residuals (with some outliers).
+
+
+# Plot GAM results
+
+```{r term_plots}
+
+# Set plot output directory
+
+plot_dir <- "figures/"
+
+theme_set(theme_classic())
+
+## Main GAM partial effect plots
+
+# Extract smooth shapes as data frame using gratia
+
+mod1_smooths <- gratia::smooth_estimates(mod1, unconditional = TRUE) %>%
+  mutate(Model = "Non-spatial",
+         ci_low= est - se * 1.96,
+         ci_high = est + se * 1.96,
+         map = map * 1000)
+mod2_k8_smooths <- gratia::smooth_estimates(mod2_k8, unconditional = TRUE) %>%
+  mutate(Model = "Spatial - high smoothing",
+         ci_low= est - se * 1.96,
+         ci_high = est + se * 1.96,
+         map = map * 1000) %>%
+  select(-c(x,y))
+mod2_k12_smooths <- gratia::smooth_estimates(mod2_k12, unconditional = TRUE) %>%
+  mutate(Model = "Spatial - medium smoothing",
+         ci_low= est - se * 1.96,
+         ci_high = est + se * 1.96,
+         map = map * 1000) %>%
+  select(-c(x,y))
+mod2_k16_smooths <- gratia::smooth_estimates(mod2_k16, unconditional = TRUE) %>%
+  mutate(Model = "Spatial - low smoothing",
+         ci_low= est - se * 1.96,
+         ci_high = est + se * 1.96,
+         map = map * 1000) %>%
+  select(-c(x,y))
+
+# Combine models into single data frame
+mod_smooths <- bind_rows(mod1_smooths,
+                         mod2_k8_smooths,
+                         mod2_k12_smooths,
+                         mod2_k16_smooths)
+
+# Read in data labels lookup table
+
+var_labels <- read_csv("csv/var_labels.csv")
+
+var_list <- var_labels$vars
+
+plots <- list(length = length(var_list))
+
+# Generate plots
+
+plots <- map(var_list, function(var) {
+  
+  # Labels for each facet window
+  # Create expressions for those with superscript/subscripts
+  x_label <- var_labels$label[var_labels$vars == var]
+  if (var_labels$parse[var_labels$vars == var]) {
+    x_label <- parse(text = x_label)
+  }
+  
+  # Plot data density plot
+  data_df <- df_model %>%
+    select(x, y, all_of(var)) %>%
+    rename(z = 3)
+  
+  density <- ggplot(data_df, aes(x = z)) +
+    geom_density(colour = "grey70", fill = "grey90", alpha = 0.6) +
+    theme_void()
+  
+  # Plot model smooths
+  smooth_df <- mod_smooths %>%
+    select(smooth, type, est, se, ci_low, ci_high, Model,
+             all_of(var)) %>%
+    mutate(Model = factor(Model, levels = c("Non-spatial",
+                                            "Spatial - low smoothing",
+                                            "Spatial - medium smoothing",
+                                            "Spatial - high smoothing")),
+           Model = ordered(Model)) %>%
+    rename(var0 = 8) %>%
+    drop_na()
+  
+  plot <- ggplot(smooth_df, aes(x = var0, y = est)) +
+    geom_ribbon(aes(ymin = ci_low, ymax = ci_high,
+                    fill = Model), alpha = 0.7) +
+    geom_line(aes(colour = Model, linetype = Model), alpha = 0.8, lwd = 0.6) +
+    scale_colour_manual(values = c("#AAAAAA", "#bae4b3", "#31a354","#006d2c")) +
+    scale_linetype_manual(values = c("longdash", "solid", "solid", "solid")) +
+    scale_fill_manual(values = c("#DDDDDD", "#daffd3", "#51c384","#208d4c")) +
+    guides(alpha = "none") +
+    ylim(-1.2, 1) +
+    labs(x = x_label,
+         y = "Partial effect")
+  
+  # Arrange into small multiples with patchwork package 
+  density + plot +
+    plot_layout(ncol = 1, nrow = 2, widths = 4, heights = c(1, 4))
+})
+
+# Create main GAM figure
+gam_plot <- ggarrange(plotlist = plots, ncol = 3, nrow = 4, common.legend = TRUE)
+
+# Save spatial term map
+ggsave(paste0(plot_dir, "main_gam_plot.jpg"),
+       plot = gam_plot,
+       width = 20, height = 30, units = "cm", dpi = 300)
+
+# Create map of spatial term for low smoothing spatial model
+
+mod2_spatial_smooth <- gratia::smooth_estimates(
+  mod2_k16,
+  n = 300,
+  smooth = "te(x,y)",
+  dist = 0.01) %>%
+  mutate(ci_low= est - se * 1.96,
+         ci_high = est + se * 1.96)
+
+spatial_rast <- mod2_spatial_smooth %>%
+  select(x, y, est) %>%
+  as.data.frame() %>%
+  rast(crs = "epsg:4326") %>%
+  mask(africa_vct) %>%
+  crop(var_stack_masked)
+
+spatial_plot_mask <- study_area_mask %>%
+  crop(spatial_rast)
+
+africa_basemap <- tm_shape(africa) + tm_borders() +
+  tm_layout(legend.position = c("left", "bottom"), legend.text.size = 0.8,
+            legend.title.size = 1,
+            legend.bg.color = "white", legend.bg.alpha = 0,
+            legend.height = -0.4) +
+  tm_graticules(n.x = 6, n.y = 6, col = "grey", labels.size = 0.6)
+
+# Create additional mask raster to overlay on excluded regions
+outside_sa <- mask(study_area_mask, study_area_mask, maskvalues = c(1, NA))
+
+sa_basemap_2 <- tm_shape(outside_sa) +
+  tm_raster(col = "values", palette = "grey75", legend.show = FALSE)
+
+rast_plot <- tm_shape(spatial_rast) +
+  tm_raster(palette = "RdYlBu", breaks = c(-2, -1, 0, 1, 2), style = "cont",
+            title = "Partial effect\nof spatial term") +
+  sa_basemap_2 +
+  africa_basemap
+
+# Save spatial term map
+tmap_save(rast_plot,
+          paste0(plot_dir, "spatial_term.jpg"),
+          width = 16, height = 12, units = "cm", dpi = 300)
+
+
+```
+
+
+Model diagnostic and residual plots
+
+```{r diag_plots}
+
+# Model diagnostic plots
+
+mod1_diag <- appraise(mod1, n_bins = 60, point_alpha = 0.05, line_col = "#888888")
+ggsave(paste0(plot_dir, "mod1_diag_plot.jpg"),
+       plot = mod1_diag,
+       width = 20, height = 16, units = "cm", dpi = 300)
+
+mod2_k8_diag <- appraise(mod2_k8, n_bins = 60, point_alpha = 0.05, line_col = "#117733")
+ggsave(paste0(plot_dir, "mod2_k8_diag_plot.jpg"),
+       plot = mod2_k8_diag,
+       width = 20, height = 16, units = "cm", dpi = 300)
+
+mod2_k12_diag <- appraise(mod2_k8, n_bins = 60, point_alpha = 0.05, line_col = "#117733")
+ggsave(paste0(plot_dir, "mod2_k12_diag_plot.jpg"),
+       plot = mod2_k12_diag,
+       width = 20, height = 16, units = "cm", dpi = 300)
+
+mod2_k16_diag <- appraise(mod2_k8, n_bins = 60, point_alpha = 0.05, line_col = "#117733")
+ggsave(paste0(plot_dir, "mod2_k16_diag_plot.jpg"),
+       plot = mod2_k16_diag,
+       width = 20, height = 16, units = "cm", dpi = 300)
+
+# Residual map
+resid_raster <- df_model %>%
+  mutate(resids = residuals(mod2_k16)) %>%
+  select(x, y, resids) %>%
+  rast(crs = "EPSG:4326")
+
+resid_plot <- tm_shape(resid_raster) + 
+  tm_raster(palette = "RdYlBu", style = "cont",
+            breaks = c(-0.5, -0.25, 0, 0.25, 0.5),
+            title = "Model residuals") +
+  sa_basemap_2 +
+  africa_basemap
+
+tmap_save(resid_plot,
+          paste0(plot_dir, "mod2_resid_map.jpg"),
+          width = 16, height = 12, unit = "cm", dpi = 300)
+
+```
+

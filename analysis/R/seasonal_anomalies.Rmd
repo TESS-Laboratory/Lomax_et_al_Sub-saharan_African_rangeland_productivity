@@ -7,8 +7,9 @@ output: html_notebook
 ---
 
 This notebook processes data on wet season length, onset dates and cessation dates
-and exports clean raster layers of wet season length, season length SD and onset
-date SD for sub-Saharan Africa.
+and exports clean raster layers of mean wet season length, season length SD and
+onset date SD for sub-Saharan Africa, as well as annual season length and mean
+onset date anomalies.
 
 ```{r setup, message = FALSE}
 
