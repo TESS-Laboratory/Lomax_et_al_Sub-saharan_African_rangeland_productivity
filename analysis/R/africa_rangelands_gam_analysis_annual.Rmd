@@ -20,17 +20,23 @@ All analysis conducted at 0.05 degree spatial resolution.
 
 ```{r setup, include=FALSE}
 
+# Data handling
 library(tidyverse)
 library(terra)
 library(sf)
-library(tmap)
+library(here)
+
+# Analysis
 library(mgcv)
 library(parallel)
+library(beepr)
+library(tictoc)
+
+# Visualisation
+library(tmap)
 library(gratia)
 library(ggpubr)
 library(patchwork)
-library(beepr)
-library(here)
 
 terraOptions(tempdir = here("data", "temp", "terra"),
              memfrac = 0.8)
@@ -68,8 +74,6 @@ gpp <- rast(here("data", "raw_data", "raster", "annual_variables",
                       "gppAnnualBandsExport.tif")) * 0.01
 
 # CHIRPS precipitation variables
-map <- rast(here("data", "raw_data", "raster", "main_variables",
-                 "chirps_MAP.tif"))
 precipitation_vars <- rast(here("data", "raw_data", "raster", "annual_variables",
                                 "pptAnnualVarsSsa.tif"))
 
@@ -505,19 +509,16 @@ while (!is.null(dev.list()))  dev.off()
 We remove covariates with > 0.7 Spearman's Rank correlation coefficient with
 other covariates, leaving the following:
 
-- MAP
-- CV
+- Mean annual precipitation
+- Precipitation anomaly
+- Precipitaton mean day anomaly
+- Precipitation intensity
+- F95w
 - UGi
-- season
-- sigma_onset
-- SDII
-- F_95w
-- soilN
-- sand
-- meanT
-- LST
-- fire
-
+- Mean air temperature
+- Soil sand fraction
+- Soil N content
+- Fire occurrence
 
 # GAMs
 
@@ -528,9 +529,9 @@ The dependent variable (GPP) is non-negative and variance tends to increase with
 the mean. A Gamma distribution with a log link may therefore be appropriate
 for modelling these data.
 
-We also include a smooth function of latitude and longitude s(x,y) to include
+We also include a smooth function of latitude and longitude te(x,y) to include
 spatial relationships and spatially correlated errors not accounted for by other
-covariates.
+covariates, as well as a smooth function of time s(year)
 
 To prepare for GAM modelling, we select only covariates retained from correlation
 analysis above.
@@ -539,40 +540,45 @@ analysis above.
 
 # Select model variables and scale some to more consistent units (0-1)
 df_model <- df %>%
-  dplyr::select(x, y, gpp, map, cv, ugi, season, onset_sd, intensity, wet95,
-                soilN, sand, meanT, lst_mean, fire)%>%
-  filter(season > 0) %>%    # Remove pixels with season length == 0 (errors)
+  dplyr::select(x, y, year, gpp, precipitation, pptMean, pptAnomaly, pptIntensity,
+                pptGt95Pc, pptMeanDayAnomaly, pptUgi,
+                N, sand, tMean, fire) %>%
   mutate(gpp = gpp * 0.001,
          sand = sand * 0.01,
-         map = map * 0.001,
-         cv = cv * 0.01)
+         pptMean = pptMean * 0.001,
+         precipitation = precipitation * 0.01)
 
 # Write intermediate CSV for modelling
 
 # write_csv(df_model,
-#           here("data", "processed_data", "csv", "df_model.csv"))
-# df_model <- read_csv(here("data", "processed_data", "csv", "df_model.csv"))
+#           here("data", "processed_data", "csv", "df_model_annual.csv"))
+# df_model <- read_csv(here("data", "processed_data", "csv", "df_model_annual.csv"))
 
 ```
+
 
 Non-spatial model including all covariates
 
 ```{r gam_1, cache = F, dependson = c("load", "mask", "to_df", "gam_prep")}
 
 t1 <- Sys.time()
-mod1 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
-              s(ugi, k = 8, bs = "ts") +
-              s(season, k = 12, bs = "ts") + s(onset_sd, k = 8, bs = "ts") +
-              s(wet95, k = 6, bs = "ts") + s(intensity, k = 8, bs = "ts") +
-              s(soilN, k = 8, bs = "ts") + s(sand, k = 6, bs = "ts") +
-              s(lst_mean, k = 8, bs = "ts") +
-              s(meanT, k = 8, bs = "ts") +
-              s(fire, k = 8, bs = "ts"),
+mod1 <- bam(gpp ~ s(precipitation, k = 16, bs = "ts") +
+              s(pptMeanDayAnomaly, k = 12, bs = "ts") +
+              ti(precipitation, pptMeanDayAnomaly, k = c(8,8), bs = "ts") +
+              s(pptIntensity, k = 8, bs = "ts") +
+              s(pptGt95Pc, k = 8, bs = "ts") +
+              s(pptUgi, k = 8, bs = "ts") +
+              s(tMean, k = 8, bs = "ts") +
+              s(burn, k = 8, bs = "ts") +
+              s(sand, k = 8, bs = "ts") +
+              s(N, k = 8, bs = "ts") +
+              te(x, y, k = c(12, 12), bs = "ts") +
+              s(year, k = 8, bs = "ts"),
             data = df_model,
             method = "REML",
             family = Gamma(link = "log"),
             select = TRUE,
-            cluster = nc)
+            cluster = cl)
 t2 <- Sys.time()
 t2 - t1
 
@@ -601,105 +607,48 @@ F95w (extreme rainfall).
 Pairwise concurvity remains low, suggesting the variables are sufficiently
 independent.
 
-Now I add the spatial term to account for the spatial structure in the model
-residuals.
+Additional model that splits precipitation into mean annual precipitation
+(across the whole time series) and an annual anomaly.
 
 ```{r gam_2, cache = F, dependson = c("load", "mask", "to_df", "gam_prep")}
 
-# Spatial model - high smoothing (k = c(8,8) for spatial term)
-Sys.time()
+# Model with mean precipitation and annual anomaly
 t1 <- Sys.time()
-mod2_k8 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
-              s(ugi, k = 8, bs = "ts") +
-              s(season, k = 12, bs = "ts") + s(onset_sd, k = 8, bs = "ts") +
-              s(wet95, k = 6, bs = "ts") + s(intensity, k = 8, bs = "ts") +
-              s(soilN, k = 8, bs = "ts") + s(sand, k = 6, bs = "ts") +
-              s(lst_mean, k = 8, bs = "ts") +
-              s(meanT, k = 8, bs = "ts") +
-              s(fire, k = 8, bs = "ts") +
-              te(x, y, k = c(8, 8), bs = "ts"),
+mod2 <- bam(gpp ~ s(pptMean, k = 16, bs = "ts") +
+              s(pptAnomaly, k = 12, bs = "ts") +
+              ti(pptMean, pptAnomaly, k = 12, bs = "ts") +
+              s(pptMeanDayAnomaly, k = 12, bs = "ts") +
+              ti(pptAnomaly, pptMeanDayAnomaly, k = c(8,8), bs = "ts") +
+              s(pptIntensity, k = 8, bs = "ts") +
+              s(pptGt95Pc, k = 8, bs = "ts") +
+              s(pptUgi, k = 8, bs = "ts") +
+              s(tMean, k = 8, bs = "ts") +
+              s(burn, k = 8, bs = "ts") +
+              s(sand, k = 8, bs = "ts") +
+              s(N, k = 8, bs = "ts") +
+              te(x, y, k = c(12, 12), bs = "ts") +
+              s(year, k = 8, bs = "ts"),
             data = df_model,
             method = "REML",
             family = Gamma(link = "log"),
             select = TRUE,
-            cluster = nc)
+            cluster = cl)
 t2 <- Sys.time()
 t2 - t1
 
 beep(5)
-
-# Spatial model - medium smoothing (k = c(12,12) for spatial term)
-Sys.time()
-t1 <- Sys.time()
-mod2_k12 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
-              s(ugi, k = 8, bs = "ts") +
-              s(season, k = 12, bs = "ts") + s(onset_sd, k = 8, bs = "ts") +
-              s(wet95, k = 6, bs = "ts") + s(intensity, k = 8, bs = "ts") +
-              s(soilN, k = 8, bs = "ts") + s(sand, k = 6, bs = "ts") +
-              s(lst_mean, k = 8, bs = "ts") +
-              s(meanT, k = 8, bs = "ts") +
-              s(fire, k = 8, bs = "ts") +
-              te(x, y, k = c(12, 12), bs = "ts"),
-            data = df_model,
-            method = "REML",
-            family = Gamma(link = "log"),
-            select = TRUE,
-            cluster = nc)
-t2 <- Sys.time()
-t2 - t1
-
-beep(5)
-
-# Spatial model - low smoothing (k = c(16,16) for spatial term)
-
-Sys.time()
-t1 <- Sys.time()
-mod2_k16 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
-              s(ugi, k = 8, bs = "ts") +
-              s(season, k = 12, bs = "ts") + s(onset_sd, k = 8, bs = "ts") +
-              s(wet95, k = 6, bs = "ts") + s(intensity, k = 8, bs = "ts") +
-              s(soilN, k = 8, bs = "ts") + s(sand, k = 6, bs = "ts") +
-              s(lst_mean, k = 8, bs = "ts") +
-              s(meanT, k = 8, bs = "ts") +
-              s(fire, k = 8, bs = "ts") +
-              te(x, y, k = c(16, 16), bs = "ts"),
-            data = df_model,
-            method = "REML",
-            family = Gamma(link = "log"),
-            select = TRUE,
-            cluster = nc)
-t2 <- Sys.time()
-t2 - t1
-
-beep(3)
 
 # # Save/load model results
 
-# saveRDS(mod2_k8, "processed_data/models/mod2_k8.rds")
-# saveRDS(mod2_k12, "processed_data/models/mod2_k12.rds")
-# saveRDS(mod2_k16, "processed_data/models/mod2_k16.rds")
-# mod2_k8 <- readRDS("processed_data/models/mod2_k8.rds")
-# mod2_k12 <- readRDS("processed_data/models/mod2_k12.rds")
-# mod2_k16 <- readRDS("processed_data/models/mod2_k16.rds")
+# saveRDS(mod2, "processed_data/models/mod2_annual.rds")
 
 # Model 2 results
 
-plot(mod2_k8, shade = TRUE, seWithMean = TRUE, scheme = 2,
-     pages = 3)
-plot(mod2_k12, shade = TRUE, seWithMean = TRUE, scheme = 2,
-     pages = 3)
-plot(mod2_k16, shade = TRUE, seWithMean = TRUE, scheme = 2,
+plot(mod2, shade = TRUE, seWithMean = TRUE, scheme = 2,
      pages = 3)
 
-print("Spatial term k = 8")
-gam.check(mod2_k8)
-print("Spatial term k = 12")
-gam.check(mod2_k12)
-print("Spatial term k = 16")
-gam.check(mod2_k16)
+gam.check(mod2)
 
-
-beep(3)
 
 ```
 
@@ -722,34 +671,21 @@ theme_set(theme_classic())
 # Extract smooth shapes as data frame using gratia
 
 mod1_smooths <- gratia::smooth_estimates(mod1, unconditional = TRUE) %>%
-  mutate(Model = "Non-spatial",
+  mutate(Model = "Raw precipitation",
          ci_low= est - se * 1.96,
          ci_high = est + se * 1.96,
-         map = map * 1000)
-mod2_k8_smooths <- gratia::smooth_estimates(mod2_k8, unconditional = TRUE) %>%
-  mutate(Model = "Spatial - high smoothing",
+         precipitation = precipitation * 1000)
+mod2_smooths <- gratia::smooth_estimates(mod2, unconditional = TRUE) %>%
+  mutate(Model = "Mean precipitaton and anomaly",
          ci_low= est - se * 1.96,
          ci_high = est + se * 1.96,
-         map = map * 1000) %>%
+         pptMean = pptMean * 1000) %>%
   select(-c(x,y))
-mod2_k12_smooths <- gratia::smooth_estimates(mod2_k12, unconditional = TRUE) %>%
-  mutate(Model = "Spatial - medium smoothing",
-         ci_low= est - se * 1.96,
-         ci_high = est + se * 1.96,
-         map = map * 1000) %>%
-  select(-c(x,y))
-mod2_k16_smooths <- gratia::smooth_estimates(mod2_k16, unconditional = TRUE) %>%
-  mutate(Model = "Spatial - low smoothing",
-         ci_low= est - se * 1.96,
-         ci_high = est + se * 1.96,
-         map = map * 1000) %>%
-  select(-c(x,y))
+
 
 # Combine models into single data frame
 mod_smooths <- bind_rows(mod1_smooths,
-                         mod2_k8_smooths,
-                         mod2_k12_smooths,
-                         mod2_k16_smooths)
+                         mod2_smooths)
 
 # Read in data labels lookup table
 
@@ -871,41 +807,32 @@ Model diagnostic and residual plots
 # Model diagnostic plots
 
 mod1_diag <- appraise(mod1, n_bins = 60, point_alpha = 0.05, line_col = "#888888")
-ggsave(paste0(plot_dir, "mod1_diag_plot.jpg"),
+ggsave(paste0(plot_dir, "mod1_annual_diag_plot.jpg"),
        plot = mod1_diag,
        width = 20, height = 16, units = "cm", dpi = 300)
 
-mod2_k8_diag <- appraise(mod2_k8, n_bins = 60, point_alpha = 0.05, line_col = "#117733")
-ggsave(paste0(plot_dir, "mod2_k8_diag_plot.jpg"),
-       plot = mod2_k8_diag,
+mod2_diag <- appraise(mod2_k8, n_bins = 60, point_alpha = 0.05, line_col = "#117733")
+ggsave(paste0(plot_dir, "mod2_annual_diag_plot.jpg"),
+       plot = mod2_diag,
        width = 20, height = 16, units = "cm", dpi = 300)
 
-mod2_k12_diag <- appraise(mod2_k8, n_bins = 60, point_alpha = 0.05, line_col = "#117733")
-ggsave(paste0(plot_dir, "mod2_k12_diag_plot.jpg"),
-       plot = mod2_k12_diag,
-       width = 20, height = 16, units = "cm", dpi = 300)
 
-mod2_k16_diag <- appraise(mod2_k8, n_bins = 60, point_alpha = 0.05, line_col = "#117733")
-ggsave(paste0(plot_dir, "mod2_k16_diag_plot.jpg"),
-       plot = mod2_k16_diag,
-       width = 20, height = 16, units = "cm", dpi = 300)
-
-# Residual map
-resid_raster <- df_model %>%
-  mutate(resids = residuals(mod2_k16)) %>%
-  select(x, y, resids) %>%
-  rast(crs = "EPSG:4326")
-
-resid_plot <- tm_shape(resid_raster) + 
-  tm_raster(palette = "RdYlBu", style = "cont",
-            breaks = c(-0.5, -0.25, 0, 0.25, 0.5),
-            title = "Model residuals") +
-  sa_basemap_2 +
-  africa_basemap
-
-tmap_save(resid_plot,
-          paste0(plot_dir, "mod2_resid_map.jpg"),
-          width = 16, height = 12, unit = "cm", dpi = 300)
+# # Residual map
+# resid_raster <- df_model %>%
+#   mutate(resids = residuals(mod2_k16)) %>%
+#   select(x, y, resids) %>%
+#   rast(crs = "EPSG:4326")
+# 
+# resid_plot <- tm_shape(resid_raster) + 
+#   tm_raster(palette = "RdYlBu", style = "cont",
+#             breaks = c(-0.5, -0.25, 0, 0.25, 0.5),
+#             title = "Model residuals") +
+#   sa_basemap_2 +
+#   africa_basemap
+# 
+# tmap_save(resid_plot,
+#           paste0(plot_dir, "mod2_resid_map.jpg"),
+#           width = 16, height = 12, unit = "cm", dpi = 300)
 
 ```
 

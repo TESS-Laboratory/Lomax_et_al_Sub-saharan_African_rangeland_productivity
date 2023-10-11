@@ -1,6 +1,6 @@
 {
   "R": {
-    "Version": "4.3.0",
+    "Version": "4.3.1",
     "Repositories": [
       {
         "Name": "CRAN",
@@ -126,6 +126,20 @@
         "utils"
       ],
       "Hash": "5402c9d935b45fe528538703b5edf680"
+    },
+    "RcppEigen": {
+      "Package": "RcppEigen",
+      "Version": "0.3.3.9.3",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "Matrix",
+        "R",
+        "Rcpp",
+        "stats",
+        "utils"
+      ],
+      "Hash": "1e035db628cefb315c571202d70202fe"
     },
     "SparseM": {
       "Package": "SparseM",
@@ -570,6 +584,20 @@
         "withr"
       ],
       "Hash": "d24305b92db333726aed162a2c23a147"
+    },
+    "desc": {
+      "Package": "desc",
+      "Version": "1.4.2",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "R",
+        "R6",
+        "cli",
+        "rprojroot",
+        "utils"
+      ],
+      "Hash": "6b9602c7ebbe87101a9c8edb6e8b6d21"
     },
     "dichromat": {
       "Package": "dichromat",
@@ -1517,6 +1545,16 @@
       ],
       "Hash": "2c797b46eea7fb58ede195bc0b1f1138"
     },
+    "numDeriv": {
+      "Package": "numDeriv",
+      "Version": "2016.8-1.1",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "R"
+      ],
+      "Hash": "df58958f293b166e4ab885ebcad90e02"
+    },
     "openssl": {
       "Package": "openssl",
       "Version": "2.0.6",
@@ -2108,7 +2146,7 @@
     },
     "survival": {
       "Package": "survival",
-      "Version": "3.5-5",
+      "Version": "3.5-7",
       "Source": "Repository",
       "Repository": "CRAN",
       "Requirements": [
@@ -2120,7 +2158,7 @@
         "stats",
         "utils"
       ],
-      "Hash": "d683341b1fa2e8d817efde27d6e6d35b"
+      "Hash": "b8e943d262c3da0b0febd3e04517c197"
     },
     "sys": {
       "Package": "sys",
@@ -2212,6 +2250,17 @@
         "vctrs"
       ],
       "Hash": "a84e2cc86d07289b3b6f5069df7a004c"
+    },
+    "tictoc": {
+      "Package": "tictoc",
+      "Version": "1.2",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "R",
+        "methods"
+      ],
+      "Hash": "2c6c63f3f4f103d41cb2aae1ab1c7ce1"
     },
     "tidyr": {
       "Package": "tidyr",
