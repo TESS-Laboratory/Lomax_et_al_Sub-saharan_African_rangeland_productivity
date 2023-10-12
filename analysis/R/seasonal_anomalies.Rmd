@@ -25,29 +25,32 @@ Import data:
 
 ```{r load_data}
 
-# Season length raster (single and double seasons)
-season_length <- rast(here("data", "raw_data", "raster", "season_variables",
-                           "season_length_all.tif"))
+# Hydrological year dates
+hYear_start <- rast(here("data", "raw_data", "raster", "season_variables",
+                           "hYearStartMean_Export.tif")) %>%
+  crop(season_length)
+
+# Mean season dates - single and double seasons
+
+mean_season_dates_s <- rast(here("data", "raw", "raster", "season_variables",
+                               "meanSeasonDatesSingle.tif"))
+mean_season_dates_d <- rast(here("data", "raw", "raster", "season_variables",
+                               "meanSeasonDatesDouble.tif"))
 
 # Seasonal rainfall annual dates and anomalies - single seasons
-season_dates_s <- rast(here("data", "raw_data", "raster", "season_variables",
-                            "season_annual_dates_single.tif"))
-seasonal_anomalies_s <- rast(here("data", "raw_data", "raster", "season_variables",
-                                  "season_deviation_single.tif"))
+annual_season_dates_s <- rast(here("data", "raw_data", "raster", "season_variables",
+                            "annualSeasonDatesSingle.tif"))
 
-date_names <- c("onset_", "cessation_")
-year_names <- as.character(rep(2001:2019, each = 2))
+date_names_s <- c("onset_", "cessation_")
+year_names_s <- as.character(rep(2001:2019, each = 2))
 
-layer_names <- paste0(date_names, year_names)
+layer_names <- paste0(date_names_s, year_names_s)
 
-names(season_dates_s) <- layer_names
-names(seasonal_anomalies_s) <- layer_names
+names(season_dates_s) <- layer_names_s
 
 # Seasonal rainfall dates and anomalies - double seasons
-season_dates_d <- rast(here("data", "raw_data", "raster", "season_variables",
-                            "season_annual_dates_double.tif"))
-seasonal_anomalies_d <- rast(here("data", "raw_data", "raster", "season_variables",
-                                  "season_deviation_double.tif"))
+annual_season_dates_d <- rast(here("data", "raw_data", "raster", "season_variables",
+                            "annualSeasonDatesDouble.tif"))
 
 date_names_d <- c("onset1_", "cessation1_", "onset2_", "cessation2_")
 year_names_d <- as.character(rep(2001:2019, each = 4))
@@ -55,13 +58,12 @@ year_names_d <- as.character(rep(2001:2019, each = 4))
 layer_names_d <- paste0(date_names_d, year_names_d)
 
 names(season_dates_d) <- layer_names_d
-names(seasonal_anomalies_d) <- layer_names_d
 
 # Seasonality ratio
 
 seasonality_ratio <- rast(here("data", "raw_data", "raster", "season_variables",
-                               "seasonality_ratio.tif")) %>%
-  subset("amplitude_ratio")
+                               "seasonalityRatio.tif")) %>%
+  subset("seasonalityRatio")
 
 # Africa country boundaries (Natural Earth dataset)
 africa <- st_read(here("data", "raw_data", "vector", "natural_earth",
@@ -89,11 +91,13 @@ mask_function <- function(rast, double = FALSE) {
 
 # Mask single season rasters
 season_dates_s <- mask_function(season_dates_s)
-seasonal_anomalies_s <- mask_function(seasonal_anomalies_s)
 
 # Mask double season rasters
 season_dates_d <- mask_function(season_dates_d, TRUE)
-seasonal_anomalies_d <- mask_function(seasonal_anomalies_d, TRUE)
+
+# Express as dates in hydrological rather than calendar year
+season_dates_s_hYear <- season_dates_s - hYear_start
+season_dates_d_hYear <- season_dates_d - hYear_start
 
 
 ```
