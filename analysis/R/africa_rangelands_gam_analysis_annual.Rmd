@@ -20,6 +20,9 @@ All analysis conducted at 0.05 degree spatial resolution.
 
 ```{r setup, include=FALSE}
 
+# If running for first time, run renv::restore() to install required packages
+# renv::restore()
+
 # Data handling
 library(tidyverse)
 library(terra)
@@ -49,7 +52,7 @@ ggplot2::theme_set(theme_bw())
 tmap_options(check.and.fix = TRUE)
 
 # Parallelisation
-nc <- detectCores() - 2
+nc <- detectCores() - 8
 cl <- makeCluster(nc)
 
 ```
