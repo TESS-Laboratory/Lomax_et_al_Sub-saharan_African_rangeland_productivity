@@ -26,9 +26,8 @@ Import data:
 ```{r load_data}
 
 # Hydrological year dates
-hYear_start <- rast(here("data", "raw_data", "raster", "season_variables",
-                           "hYearStartMean_Export.tif")) %>%
-  crop(season_length)
+hYear_start <- rast(here("data", "raw", "raster", "season_variables",
+                           "hYearStartMean.tif"))
 
 # Mean season dates - single and double seasons
 
@@ -38,35 +37,36 @@ mean_season_dates_d <- rast(here("data", "raw", "raster", "season_variables",
                                "meanSeasonDatesDouble.tif"))
 
 # Seasonal rainfall annual dates and anomalies - single seasons
-annual_season_dates_s <- rast(here("data", "raw_data", "raster", "season_variables",
-                            "annualSeasonDatesSingle.tif"))
+# Note that annual dates are expressed relative to the hydrological year start
+annual_season_dates_s <- rast(here("data", "raw", "raster", "season_variables",
+                            "annualSeasonDatesSingleHYear.tif"))
 
 date_names_s <- c("onset_", "cessation_")
 year_names_s <- as.character(rep(2001:2019, each = 2))
 
-layer_names <- paste0(date_names_s, year_names_s)
+layer_names_s <- paste0(date_names_s, year_names_s)
 
-names(season_dates_s) <- layer_names_s
+names(annual_season_dates_s) <- layer_names_s
 
 # Seasonal rainfall dates and anomalies - double seasons
-annual_season_dates_d <- rast(here("data", "raw_data", "raster", "season_variables",
-                            "annualSeasonDatesDouble.tif"))
+annual_season_dates_d <- rast(here("data", "raw", "raster", "season_variables",
+                            "annualSeasonDatesDoubleHYear.tif"))
 
 date_names_d <- c("onset1_", "cessation1_", "onset2_", "cessation2_")
 year_names_d <- as.character(rep(2001:2019, each = 4))
 
 layer_names_d <- paste0(date_names_d, year_names_d)
 
-names(season_dates_d) <- layer_names_d
+names(annual_season_dates_d) <- layer_names_d
 
 # Seasonality ratio
 
-seasonality_ratio <- rast(here("data", "raw_data", "raster", "season_variables",
+seasonality_ratio <- rast(here("data", "raw", "raster", "season_variables",
                                "seasonalityRatio.tif")) %>%
   subset("seasonalityRatio")
 
 # Africa country boundaries (Natural Earth dataset)
-africa <- st_read(here("data", "raw_data", "vector", "natural_earth",
+africa <- st_read(here("data", "raw", "vector", "natural_earth",
                        "ne_110m_admin_0_countries_fixed.shp")) %>%
   filter(CONTINENT == "Africa") %>%
   vect()
@@ -77,28 +77,43 @@ Mask and process single and double season rasters into single raster objects
 
 ``` {r pre-process}
 
+# Clip rasters to same extent (GEE export issue)
+hYear_start <- crop(hYear_start, annual_season_dates_s)
+
 # Function to mask to study area and separate single from double season pixels
 mask_function <- function(rast, double = FALSE) {
   
-  if(double == TRUE) {
+  rast_cropped <- crop(rast, seasonality_ratio)
+  rast_zero <- any(rast_cropped != 0)
+  
+  if(double
+     ) {
     seasonality_mask <- seasonality_ratio >= 1
   } else {
     seasonality_mask <- seasonality_ratio < 1
   }
 
-  mask(rast, seasonality_mask, maskvalues = c(0, NA))
+  rast_masked <- rast_cropped %>%
+    mask(seasonality_mask, maskvalues = c(0, NA)) %>%
+    mask(rast_zero, maskvalues = c(0,NA))
 }
 
 # Mask single season rasters
-season_dates_s <- mask_function(season_dates_s)
+mean_season_dates_s <- mask_function(mean_season_dates_s, FALSE)
+annual_season_dates_s <- mask_function(annual_season_dates_s, FALSE)
 
 # Mask double season rasters
-season_dates_d <- mask_function(season_dates_d, TRUE)
+mean_season_dates_d <- mask_function(mean_season_dates_d, TRUE)
+annual_season_dates_d <- mask_function(annual_season_dates_d, TRUE)
 
-# Express as dates in hydrological rather than calendar year
-season_dates_s_hYear <- season_dates_s - hYear_start
-season_dates_d_hYear <- season_dates_d - hYear_start
+# Calculate mean start and end dates relative to hydrological year start
 
+mean_season_dates_s_hYear <- (mean_season_dates_s + 365 - hYear_start) %% 365
+mean_season_dates_d_hYear <- (mean_season_dates_d + 365 - hYear_start) %% 365
+
+# Calculate anomalies in onset and cessation dates
+season_dates_anomaly_s <- annual_season_dates_s - mean_season_dates_s_hYear
+season_dates_anomaly_d <- annual_season_dates_d - mean_season_dates_d_hYear
 
 ```
 
@@ -111,46 +126,46 @@ Explore data and identify issues/errors:
 # summary(seasonal_anomalies_d)
 
 # Single season onset dates
-onset_anomalies_s <- seasonal_anomalies_s[[grepl("onset", names(seasonal_anomalies_s))]]
+onset_anomaly_s <- season_dates_anomaly_s[[grepl("onset", names(season_dates_anomaly_s))]]
 
-a <- sum(values(onset_anomalies_s) < -60 | values(onset_anomalies_s) > 120, na.rm = TRUE)
-b <- sum(!is.na(values(onset_anomalies_s)))
+a <- sum(values(onset_anomaly_s) < -60 | values(onset_anomaly_s) > 60, na.rm = TRUE)
+b <- sum(!is.na(values(onset_anomaly_s)))
 print("Single season onset")
 a/b
 
 # Double season onset dates
-onset_anomalies_d <- seasonal_anomalies_d[[grepl("onset", names(seasonal_anomalies_d))]]
+onset_anomaly_d <- season_dates_anomaly_d[[grepl("onset", names(season_dates_anomaly_d))]]
 
 
-c <- sum(values(onset_anomalies_d) < -45 | values(onset_anomalies_d) > 60, na.rm = TRUE)
-d <- sum(!is.na(values(onset_anomalies_d)))
+c <- sum(values(onset_anomaly_d) < -45 | values(onset_anomaly_d) > 45, na.rm = TRUE)
+d <- sum(!is.na(values(onset_anomaly_d)))
 print("Double season onset")
 c/d
 
 # Single season cessation dates
-cessation_anomalies_s <- seasonal_anomalies_s[[grepl("cessation", names(seasonal_anomalies_s))]]
+cessation_anomaly_s <- season_dates_anomaly_s[[grepl("cessation", names(season_dates_anomaly_s))]]
 
-# summary(cessation_anomalies)
-e <- sum(values(cessation_anomalies_s) < -120 | values(cessation_anomalies_s) > 120, na.rm = TRUE)
-f <- sum(!is.na(values(cessation_anomalies_s)))
+# summary(cessation_anomaly)
+e <- sum(values(cessation_anomaly_s) < -60 | values(cessation_anomaly_s) > 60, na.rm = TRUE)
+f <- sum(!is.na(values(cessation_anomaly_s)))
 print("Single season cessation")
 e/f
 
 # Double season cessation dates
-cessation_anomalies_d <- seasonal_anomalies_d[[grepl("cessation", names(seasonal_anomalies_d))]]
+cessation_anomaly_d <- season_dates_anomaly_d[[grepl("cessation", names(season_dates_anomaly_d))]]
 
-# summary(cessation_anomalies)
-g <- sum(values(cessation_anomalies_d) < -60 | values(cessation_anomalies_d) > 45, na.rm = TRUE)
-h <- sum(!is.na(values(cessation_anomalies_d)))
+# summary(cessation_anomaly)
+g <- sum(values(cessation_anomaly_d) < -45 | values(cessation_anomaly_d) > 45, na.rm = TRUE)
+h <- sum(!is.na(values(cessation_anomaly_d)))
 print("Double season cessation")
 g/h
 
 # Identify pixels that have values outside the expected range
 
-onset_error_pixels <- sum(onset_anomalies_s < -60 | onset_anomalies_s > 120)
-cessation_error_pixels <- sum(cessation_anomalies_s < -120 | cessation_anomalies_s > 120)
-onset_error_pixels_d <- sum(onset_anomalies_d < -45 | onset_anomalies_d > 60)
-cessation_error_pixels_d <- sum(cessation_anomalies_d < -60 | cessation_anomalies_d > 45)
+onset_error_pixels <- sum(onset_anomaly_s < -60 | onset_anomaly_s > 60)
+cessation_error_pixels <- sum(cessation_anomaly_s < -60 | cessation_anomaly_s > 60)
+onset_error_pixels_d <- sum(onset_anomaly_d < -45 | onset_anomaly_d > 45)
+cessation_error_pixels_d <- sum(cessation_anomaly_d < -45 | cessation_anomaly_d > 45)
 
 all_onset_errors <- merge(onset_error_pixels, onset_error_pixels_d)
 all_cessation_errors <- merge(cessation_error_pixels, cessation_error_pixels_d)
@@ -168,28 +183,28 @@ identified:
 ```{r date_anomaly_pre_processing}
 
 # Create a mask for removing seasons/years where one date is undetermined
-anomaly_mask_s <- (onset_anomalies_s >= -60 &
-                          onset_anomalies_s <= 120) & 
-                       (cessation_anomalies_s >= -120 &
-                          cessation_anomalies_s <= 120)
+anomaly_mask_s <- (onset_anomaly_s >= -60 &
+                          onset_anomaly_s <= 60) & 
+                       (cessation_anomaly_s >= -60 &
+                          cessation_anomaly_s <= 60)
 
-anomaly_mask_d <- (onset_anomalies_d >= -45 &
-                          onset_anomalies_d <= 60) & 
-                       (cessation_anomalies_d >= -60 &
-                          cessation_anomalies_d <= 45)
+anomaly_mask_d <- (onset_anomaly_d >= -45 &
+                          onset_anomaly_d <= 45) & 
+                       (cessation_anomaly_d >= -45 &
+                          cessation_anomaly_d <= 45)
 
-# Fully mask pixels where more than 20% of years/seasons include NAs
+# Fully mask pixels where more than 25% of years/seasons include NAs
 lack_of_data_s <- 
-  (sum(anomaly_mask_s) > nlyr(anomaly_mask_s) * 0.8)
+  (sum(anomaly_mask_s) > nlyr(anomaly_mask_s) * 0.75)
 lack_of_data_d <- 
-  (sum(anomaly_mask_d) > nlyr(anomaly_mask_d) * 0.8)
+  (sum(anomaly_mask_d) > nlyr(anomaly_mask_d) * 0.75)
 
 lack_of_data <- merge(lack_of_data_s, lack_of_data_d)
 
 # Apply masks
 
 NA_mask <- function(rast, double = FALSE) {
-  if(double == TRUE) {
+  if(double) {
     anomaly_mask <- anomaly_mask_d
   } else {
     anomaly_mask <- anomaly_mask_s
@@ -200,27 +215,27 @@ NA_mask <- function(rast, double = FALSE) {
     mask(lack_of_data, maskvalues = c(0, NA))
 }
 
-onset_anomalies_s_masked <- NA_mask(onset_anomalies_s)
-cessation_anomalies_s_masked <- NA_mask(cessation_anomalies_s)
-onset_anomalies_d_masked <- NA_mask(onset_anomalies_d, double = TRUE)
-cessation_anomalies_d_masked <- NA_mask(cessation_anomalies_d, double = TRUE)
+onset_anomaly_s_masked <- NA_mask(onset_anomaly_s)
+cessation_anomaly_s_masked <- NA_mask(cessation_anomaly_s)
+onset_anomaly_d_masked <- NA_mask(onset_anomaly_d, double = TRUE)
+cessation_anomaly_d_masked <- NA_mask(cessation_anomaly_d, double = TRUE)
 
 # Apply the same mask to the raw season onset/cessation layers
 
-onset_dates_s <- season_dates_s[[grepl("onset", names(season_dates_s))]] %>%
+onset_dates_s <- annual_season_dates_s[[grepl("onset", names(annual_season_dates_s))]] %>%
   NA_mask()
-cessation_dates_s <- season_dates_s[[grepl("cessation", names(season_dates_s))]] %>%
+cessation_dates_s <- annual_season_dates_s[[grepl("cessation", names(annual_season_dates_s))]] %>%
   NA_mask()
 
-onset_dates_d <- season_dates_d[[grepl("onset", names(season_dates_d))]] %>%
+onset_dates_d <- annual_season_dates_d[[grepl("onset", names(annual_season_dates_d))]] %>%
   NA_mask(double = TRUE)
-cessation_dates_d <- season_dates_d[[grepl("cessation", names(season_dates_d))]] %>%
+cessation_dates_d <- annual_season_dates_d[[grepl("cessation", names(annual_season_dates_d))]] %>%
   NA_mask(double = TRUE)
 
-# summary(onset_anomalies_s_masked)
-# summary(cessation_anomalies_s_masked)
-# summary(onset_anomalies_d_masked)
-# summary(cessation_anomalies_d_masked)
+# summary(onset_anomaly_s_masked)
+# summary(cessation_anomaly_s_masked)
+# summary(onset_anomaly_d_masked)
+# summary(cessation_anomaly_d_masked)
 
 ```
 
@@ -229,9 +244,16 @@ into a single layer:
 
 ```{r seasonal_metrics}
 
+# Calculate average season lengths and merge
+mean_length_s <- mean_season_dates_s_hYear[[2]] - mean_season_dates_s_hYear[[1]]
+mean_length_d <- (mean_season_dates_d_hYear[[c(2,4)]] - mean_season_dates_d_hYear[[c(1,3)]]) %>%
+  sum()
+
+mean_length <- merge(mean_length_s, mean_length_d)
+
 # Calculate total season lengths and merge
 annual_length_s <- cessation_dates_s - onset_dates_s
-season_length_d <- (cessation_dates_d - onset_dates_d)
+season_length_d <- cessation_dates_d - onset_dates_d
 
 # For double, sum individual season lengths for each year
 annual_length_d <- season_length_d[[seq(1, nlyr(season_length_d)-1, 2)]] +
@@ -255,8 +277,8 @@ season_sd <- function(x) {
 season_length_sd <- app(annual_length_all, fun = season_sd)
 
 # Calculate onset sd
-season_onset_sd_s <- app(onset_anomalies_s_masked, fun = season_sd)
-season_onset_sd_d <- app(onset_anomalies_d_masked, fun = season_sd)
+season_onset_sd_s <- app(onset_anomaly_s_masked, fun = season_sd)
+season_onset_sd_d <- app(onset_anomaly_d_masked, fun = season_sd)
 season_onset_sd <- merge(season_onset_sd_s, season_onset_sd_d)
 
 ```
@@ -266,9 +288,9 @@ Export data:
 ```{r export}
 
 # Export as data layers for use in modelling
-writeRaster(season_length_sd, "processed_data/raster/season_length_sd.tif",
+writeRaster(season_length_sd, "processed/raster/season_length_sd.tif",
             overwrite = TRUE)
-writeRaster(season_onset_sd, "processed_data/raster/season_onset_sd.tif",
+writeRaster(season_onset_sd, "processed/raster/season_onset_sd.tif",
             overwrite = TRUE)
 
 ```

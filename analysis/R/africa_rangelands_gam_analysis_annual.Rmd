@@ -490,7 +490,7 @@ cor_matrix = df %>%
 
 # var_names <- c("GPP", "MAP", "CV", "SDII", "dry", "UGi", "PCI", ":F[95]",
 #                ":F['95w']", ":D['10mm']", ":D['30mm']", "season", ":sigma[onset]",
-#                "sand", "clay", "soilN", "soilP", "meanT", "LST", "fire")
+#                "sand", "clay", "soilN", "soilP", "tMean", "fire")
 # colnames(cor_matrix) <- var_names
 # rownames(cor_matrix) <- var_names
 
