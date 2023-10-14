@@ -58,89 +58,86 @@ using Google Earth Engine.
 ```{r load_data, results = "hide", include = FALSE}
 
 # Africa country boundaries (Natural Earth dataset)
-countries <- st_read(here("data", "raw_data", "vector", "natural_earth",
+countries <- st_read(here("data", "raw", "vector", "natural_earth",
                           "ne_110m_admin_0_countries_fixed.shp"))
 africa <- filter(countries, CONTINENT == "Africa")
 africa_vct <- vect(africa)
 
 # PML_V2 multi-annual mean GPP values 
 # Convert GPP to raw units (scale by 0.01)
-gpp_mean <- rast(here("data", "raw_data", "raster", "main_variables",
-                      "pmlv2_gpp_mean.tif")) * 0.01
+gpp_mean <- rast(here("data", "raw", "raster", "main_variables",
+                      "gppMean.tif")) * 0.01
 
 # CHIRPS precipitation variables
-map <- rast(here("data", "raw_data", "raster", "main_variables",
-                 "chirps_MAP.tif"))
-cv <- rast(here("data", "raw_data", "raster", "main_variables",
-                "chirps_annual_CV.tif"))
-intensity <- rast(here("data", "raw_data", "raster", "main_variables",
-                "chirps_intensity.tif"))
+map <- rast(here("data", "raw", "raster", "main_variables",
+                 "pptMean.tif"))
+cv <- rast(here("data", "raw", "raster", "main_variables",
+                "pptCV.tif"))
+intensity <- rast(here("data", "raw", "raster", "main_variables",
+                "pptIntensity.tif"))
 dry <- rast(here("data", "raw_data", "raster", "main_variables",
-                "chirps_dry_days.tif"))
-ugi <- rast(here("data", "raw_data", "raster", "main_variables",
-                "chirps_UGi.tif"))
-pci <- rast(here("data", "raw_data", "raster", "main_variables",
-                "chirps_PCI.tif"))
-pc_95 <- rast(here("data", "raw_data", "raster", "main_variables",
-                "chirps_95pc.tif"))
-wet_95 <- rast(here("data", "raw_data", "raster", "main_variables",
-                "chirps_wet_95pc.tif"))
-gt10 <- rast(here("data", "raw_data", "raster", "main_variables",
-                "chirps_exceed_10.tif"))
-gt20 <- rast(here("data", "raw_data", "raster", "main_variables",
-                "chirps_exceed_20.tif"))
-gt30 <- rast(here("data", "raw_data", "raster", "main_variables",
-                "chirps_exceed_30.tif"))
+                "fracDryDays.tif"))
+ugi <- rast(here("data", "raw", "raster", "main_variables",
+                "ugi.tif"))
+pci <- rast(here("data", "raw", "raster", "main_variables",
+                "pci.tif"))
+pc_95 <- rast(here("data", "raw", "raster", "main_variables",
+                "pptF95.tif"))
+wet_95 <- rast(here("data", "raw", "raster", "main_variables",
+                "pptF95W.tif"))
+gt10 <- rast(here("data", "raw", "raster", "main_variables",
+                "pptExceed_10.tif"))
+gt20 <- rast(here("data", "raw", "raster", "main_variables",
+                "pptExceed_20.tif"))
+gt30 <- rast(here("data", "raw", "raster", "main_variables",
+                "pptExceed_30.tif"))
 
 # CHIRPS season length and onset data 
-season_length <- rast(here("data", "raw_data", "raster", "season_variables",
+season_length <- rast(here("data", "raw", "raster", "season_variables",
                            "season_length_all.tif"))
-season_length_sd <- rast(here("data", "processed_data", "raster",
+season_length_sd <- rast(here("data", "processed", "raster",
                               "season_length_sd.tif"))
-season_onset_sd <- rast(here("data", "processed_data", "raster",
+season_onset_sd <- rast(here("data", "processed", "raster",
                              "season_onset_sd.tif"))
 
 # ERA5-Land mean air temperature
-meanT <- rast(here("data", "raw_data", "raster", "main_variables", "era5_T.tif"))
+tMean <- rast(here("data", "raw", "raster", "main_variables", "tMean.tif"))
 
-meanT_resample <- disagg(meanT, 2, method = "bilinear")
-
-# MODIS mean daytime land surface temperature
-lst <- rast(here("data", "raw_data", "raster", "main_variables", "modis_lst.tif"))
+# tMean_resample <- disagg(tMean, 2, method = "bilinear")
 
 # MODIS fire frequency 2001-2019
-fire <- rast(here("data", "raw_data", "raster", "main_variables", "modis_burn_freq.tif")) %>%
+fire <- rast(here("data", "raw", "raster", "main_variables", "modisBurnFreq.tif")) %>%
   classify(matrix(c(NA, 0), nrow = 1))
 
 # iSDAsoil data (top 20cm)
-soil <- rast(here("data", "raw_data", "raster", "main_variables", "isda_0_20_cm.tif")) %>%
+soil <- rast(here("data", "raw", "raster", "main_variables", "soil.tif")) %>%
   crop(map) # Fixing error in extent from export
 names(soil) <- c("sand", "clay", "N", "P")
 
 # Mask layers
 # Aridity index
-ai <- rast(here("data", "raw_data", "raster", "study_area_masks",
+ai <- rast(here("data", "raw", "raster", "study_area_masks",
                 "aridity.tif"))
 
 # MODIS land cover classification IGBP
-igbp <- rast(here("data", "raw_data", "raster", "study_area_masks",
-                  "IGBP_land_cover.tif"))
+igbp <- rast(here("data", "raw", "raster", "study_area_masks",
+                  "IGBPLandCover.tif"))
 
 # ESA WorldCover 10m land cover masks (2020)
 # Additional higher-resolution layers excluding urban, cropland and forested land
-esa_other <- rast(here("data", "raw_data", "raster", "study_area_masks",
-                  "esa_lc_frac.tif"))
-esa_tree <- rast(here("data", "raw_data", "raster", "study_area_masks",
-                  "esa_tree_frac.tif"))
+esa_other <- rast(here("data", "raw", "raster", "study_area_masks",
+                  "esaLcFrac.tif"))
+esa_woody <- rast(here("data", "raw", "raster", "study_area_masks",
+                  "esaWoodyFrac.tif"))
 
 # Zero mask (remove pixels where more than 25% of sub-pixels are zero for all
 # years in the dataset)
-zero_mask <- rast(here("data", "raw_data", "raster", "study_area_masks",
-                       "pmlv2_zero_mask.tif"))
+zero_mask <- rast(here("data", "raw", "raster", "study_area_masks",
+                       "gppZeroMask.tif"))
 
 # CHIRPS seasonality ratio (for figures)
 # sr > 1 indicates multiple rainy seasons per year
-sr <- rast(here("data", "raw_data", "raster", "season_variables", "seasonality_ratio.tif"))
+sr <- rast(here("data", "raw", "raster", "season_variables", "seasonalityRatio.tif"))
 
 ```
 
@@ -169,11 +166,11 @@ keys[which.max(tabulate(match(x, keys)))]
 igbp_mode <- app(igbp_mask, getMode)
 
 # Write and read modal IGBP class layer (slow to calculate)
-writeRaster(igbp_mode, here("data", "processed_data", "raster",
+writeRaster(igbp_mode, here("data", "processed", "raster",
                             "igbp_mode.tif"),
             overwrite = TRUE)
 
-igbp_mode <- rast(here("data", "processed_data", "raster",
+igbp_mode <- rast(here("data", "processed", "raster",
                        "igbp_mode.tif"))
 
 # Aridity index mask (include areas with 0.05 < ai > 0.65)
@@ -197,7 +194,7 @@ sa_mask <- function(spatRaster) {
 
 var_stack <- c(igbp_mode,
                gpp_mean,
-               soil, fire, meanT_resample, lst,
+               soil, fire, tMean,
                map, cv, intensity, dry, ugi, pc_95, wet_95,
                gt10, gt20, gt30,
                pci, season_length, season_length_sd, season_onset_sd, sr[[3]])
@@ -205,7 +202,7 @@ var_stack <- c(igbp_mode,
 names(var_stack) <- c("lc",
                       "gpp",
                       "sand", "clay", "soilN", "soilP",
-                      "fire", "meanT", "lst_mean",
+                      "fire", "tMean",
                       "map", "cv", "intensity", "dry_days", "ugi",
                       "pc95", "wet95",
                       "gt10", "gt20", "gt30",
@@ -254,8 +251,7 @@ Variable definitions:
 |clay|Soil clay fraction 0-20cm|%|iSDAsoil|
 |soilN|Soil nitrogen content 0-20cm|g/kg|iSDAsoil|
 |soilP|Soil extractable phosphorus 0-20cm|ppm|iSDAsoil|
-|meanT|Mean annual air temperature at 2m|degC|ERA5-Land|
-|lst_mean|Mean daily land surface temperature|degC|MODIS Terra|
+|tMean|Mean annual air temperature at 2m|degC|ERA5-Land|
 |fire|Mean fire frequency 2001-2019|yr-1|MODIS Terra|
 
 
@@ -299,10 +295,8 @@ gpp_sand <- base_plot + geom_point(aes(x = sand, y = gpp), size = 0.6, alpha = 0
   labs(x = "Soil sand fraction", y = gpp_expr)
 gpp_clay <- base_plot + geom_point(aes(x = clay, y = gpp), size = 0.6, alpha = 0.75) +
   labs(x = "Soil clay fraction", y = gpp_expr)
-gpp_T <- base_plot + geom_point(aes(x = meanT, y = gpp), size = 0.6, alpha = 0.75) +
+gpp_T <- base_plot + geom_point(aes(x = tMean, y = gpp), size = 0.6, alpha = 0.75) +
   labs(x = "Mean air temperature\n(\u00B0C)", y = gpp_expr)
-gpp_lst <- base_plot + geom_point(aes(x = lst_mean, y = gpp), size = 0.6, alpha = 0.75) +
-  labs(x = "Mean daytime\nLST (\u00B0C)", y = gpp_expr)
 gpp_fire <- base_plot + geom_point(aes(x = fire, y = gpp), size = 0.6, alpha = 0.75) +
   labs(x = expression(Fire ~ frequency ~ (yr^-1)), y = gpp_expr)
 
@@ -336,7 +330,7 @@ gpp_soilP <- base_plot + geom_point(aes(x = soilP, y = gpp), size = 0.6, alpha =
 p2 <- ggarrange(gpp_map, gpp_cv, gpp_ugi, gpp_season, gpp_onset_sd, gpp_int, gpp_wet95,
                 nrow = 4, ncol = 2, common.legend = TRUE)
 
-p3 <- ggarrange(gpp_soilN, gpp_sand, gpp_T, gpp_lst, gpp_fire,
+p3 <- ggarrange(gpp_soilN, gpp_sand, gpp_T, gpp_fire,
                 nrow = 3, ncol = 2, common.legend = TRUE)
 
 # Save figures to directory
@@ -485,19 +479,12 @@ clay_map <- tm_shape(var_stack_reproject[["clay"]]) +
 
 # Temperature maps
 
-T_map <- tm_shape(var_stack_reproject[["meanT"]]) +
+T_map <- tm_shape(var_stack_reproject[["tMean"]]) +
   tm_raster(style = "cont", n = 10, palette = "-RdYlBu", title = "MAT (\u00B0C)",
             breaks = seq(10, 35, 5)) +
   sa_basemap +
   africa_basemap +
   tm_layout(main.title = "c)")
-
-lst_map <- tm_shape(var_stack_reproject[["lst_mean"]]) +
-  tm_raster(style = "cont", n = 10, palette = "-RdYlBu", title = "LST (\u00B0C)",
-            breaks = seq(20, 45, 5)) +
-  sa_basemap +
-  africa_basemap +
-  tm_layout(main.title = "d)")
 
 # Fire frequency map
 
@@ -522,7 +509,6 @@ fire_map <- tm_shape(var_stack_reproject[["fire"]]) +
 # soilN_map
 # soilP_map
 # T_map
-# lst_map
 
 # Save map figures to directory
 
@@ -544,12 +530,12 @@ Calculate correlation matrix for all variables in dataset:
 
 cor_matrix = df %>%
   dplyr::select(gpp,map,cv,intensity,dry_days,ugi,pci,pc95,wet95,gt10,gt30,
-         season,onset_sd,sand,clay,soilN,soilP,meanT,lst_mean,fire) %>%
+         season,onset_sd,sand,clay,soilN,soilP,tMean,fire) %>%
   cor(method = "spearman", use="pairwise.complete.obs")
 
 var_names <- c("GPP", "MAP", "CV", "SDII", "dry", "UGi", "PCI", ":F[95]",
                ":F['95w']", ":D['10mm']", ":D['30mm']", "season", ":sigma[onset]",
-               "sand", "clay", "soilN", "soilP", "meanT", "LST", "fire")
+               "sand", "clay", "soilN", "soilP", "tMean", "fire")
 colnames(cor_matrix) <- var_names
 rownames(cor_matrix) <- var_names
 
@@ -577,7 +563,7 @@ other covariates, leaving the following:
 - F_95w
 - soilN
 - sand
-- meanT
+- tMean
 - LST
 - fire
 
@@ -603,7 +589,7 @@ analysis above.
 # Select model variables and scale some to more consistent units (0-1)
 df_model <- df %>%
   dplyr::select(x, y, gpp, map, cv, ugi, season, onset_sd, intensity, wet95,
-                soilN, sand, meanT, lst_mean, fire)%>%
+                soilN, sand, tMean, fire)%>%
   filter(season > 0) %>%    # Remove pixels with season length == 0 (errors)
   mutate(gpp = gpp * 0.001,
          sand = sand * 0.01,
@@ -628,8 +614,7 @@ mod1 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
               s(season, k = 12, bs = "ts") + s(onset_sd, k = 8, bs = "ts") +
               s(wet95, k = 6, bs = "ts") + s(intensity, k = 8, bs = "ts") +
               s(soilN, k = 8, bs = "ts") + s(sand, k = 6, bs = "ts") +
-              s(lst_mean, k = 8, bs = "ts") +
-              s(meanT, k = 8, bs = "ts") +
+              s(tMean, k = 8, bs = "ts") +
               s(fire, k = 8, bs = "ts"),
             data = df_model,
             method = "REML",
@@ -677,8 +662,7 @@ mod2_k8 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
               s(season, k = 12, bs = "ts") + s(onset_sd, k = 8, bs = "ts") +
               s(wet95, k = 6, bs = "ts") + s(intensity, k = 8, bs = "ts") +
               s(soilN, k = 8, bs = "ts") + s(sand, k = 6, bs = "ts") +
-              s(lst_mean, k = 8, bs = "ts") +
-              s(meanT, k = 8, bs = "ts") +
+              s(tMean, k = 8, bs = "ts") +
               s(fire, k = 8, bs = "ts") +
               te(x, y, k = c(8, 8), bs = "ts"),
             data = df_model,
@@ -699,8 +683,7 @@ mod2_k12 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
               s(season, k = 12, bs = "ts") + s(onset_sd, k = 8, bs = "ts") +
               s(wet95, k = 6, bs = "ts") + s(intensity, k = 8, bs = "ts") +
               s(soilN, k = 8, bs = "ts") + s(sand, k = 6, bs = "ts") +
-              s(lst_mean, k = 8, bs = "ts") +
-              s(meanT, k = 8, bs = "ts") +
+              s(tMean, k = 8, bs = "ts") +
               s(fire, k = 8, bs = "ts") +
               te(x, y, k = c(12, 12), bs = "ts"),
             data = df_model,
@@ -722,8 +705,7 @@ mod2_k16 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
               s(season, k = 12, bs = "ts") + s(onset_sd, k = 8, bs = "ts") +
               s(wet95, k = 6, bs = "ts") + s(intensity, k = 8, bs = "ts") +
               s(soilN, k = 8, bs = "ts") + s(sand, k = 6, bs = "ts") +
-              s(lst_mean, k = 8, bs = "ts") +
-              s(meanT, k = 8, bs = "ts") +
+              s(tMean, k = 8, bs = "ts") +
               s(fire, k = 8, bs = "ts") +
               te(x, y, k = c(16, 16), bs = "ts"),
             data = df_model,

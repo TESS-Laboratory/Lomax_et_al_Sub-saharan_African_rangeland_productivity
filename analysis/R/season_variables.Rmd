@@ -1,0 +1,318 @@
+---
+title: Disentangling the environmental drivers of gross primary productivity in African rangelands - Seasonal anomaly calculation
+author: Guy Lomax
+date: 2023-05-31
+output: html_notebook
+
+---
+
+This notebook processes data on wet season length, onset dates and cessation dates
+and exports clean raster layers of mean wet season length, season length SD and
+onset date SD for sub-Saharan Africa, as well as annual season length and mean
+onset date anomalies.
+
+```{r setup, message = FALSE}
+
+library(tidyverse)
+library(terra)
+library(sf)
+library(tmap)
+library(here)
+
+```
+
+Import data:
+
+```{r load_data}
+
+# Hydrological year dates
+hYear_start <- rast(here("data", "raw", "raster", "season_variables",
+                           "hYearStartMean.tif"))
+
+# Mean season dates - single and double seasons
+
+mean_season_dates_s <- rast(here("data", "raw", "raster", "season_variables",
+                               "meanSeasonDatesSingle.tif"))
+mean_season_dates_d <- rast(here("data", "raw", "raster", "season_variables",
+                               "meanSeasonDatesDouble.tif"))
+
+# Seasonal rainfall annual dates and anomalies - single seasons
+# Note that annual dates are expressed relative to the hydrological year start
+annual_season_dates_s <- rast(here("data", "raw", "raster", "season_variables",
+                            "annualSeasonDatesSingleHYear.tif"))
+
+date_names_s <- c("onset_", "cessation_")
+year_names_s <- as.character(rep(2001:2019, each = 2))
+
+layer_names_s <- paste0(date_names_s, year_names_s)
+
+names(annual_season_dates_s) <- layer_names_s
+
+# Seasonal rainfall dates and anomalies - double seasons
+annual_season_dates_d <- rast(here("data", "raw", "raster", "season_variables",
+                            "annualSeasonDatesDoubleHYear.tif"))
+
+date_names_d <- c("onset1_", "cessation1_", "onset2_", "cessation2_")
+year_names_d <- as.character(rep(2001:2019, each = 4))
+
+layer_names_d <- paste0(date_names_d, year_names_d)
+
+names(annual_season_dates_d) <- layer_names_d
+
+# Seasonality ratio
+
+seasonality_ratio <- rast(here("data", "raw", "raster", "season_variables",
+                               "seasonalityRatio.tif")) %>%
+  subset("seasonalityRatio")
+
+# Africa country boundaries (Natural Earth dataset)
+africa <- st_read(here("data", "raw", "vector", "natural_earth",
+                       "ne_110m_admin_0_countries_fixed.shp")) %>%
+  filter(CONTINENT == "Africa") %>%
+  vect()
+
+```
+
+Mask and process single and double season rasters into single raster objects
+
+``` {r pre-process}
+
+# Clip rasters to same extent (GEE export issue)
+hYear_start <- crop(hYear_start, annual_season_dates_s)
+
+# Function to mask to study area and separate single from double season pixels
+mask_function <- function(rast, double = FALSE) {
+  
+  rast_cropped <- crop(rast, seasonality_ratio)
+  rast_zero <- any(rast_cropped != 0)
+  
+  if(double
+     ) {
+    seasonality_mask <- seasonality_ratio >= 1
+  } else {
+    seasonality_mask <- seasonality_ratio < 1
+  }
+
+  rast_masked <- rast_cropped %>%
+    mask(seasonality_mask, maskvalues = c(0, NA)) %>%
+    mask(rast_zero, maskvalues = c(0,NA))
+}
+
+# Mask single season rasters
+mean_season_dates_s <- mask_function(mean_season_dates_s, FALSE)
+annual_season_dates_s <- mask_function(annual_season_dates_s, FALSE)
+
+# Mask double season rasters
+mean_season_dates_d <- mask_function(mean_season_dates_d, TRUE)
+annual_season_dates_d <- mask_function(annual_season_dates_d, TRUE)
+
+# Calculate mean start and end dates relative to hydrological year start
+
+mean_season_dates_s_hYear <- (mean_season_dates_s + 365 - hYear_start) %% 365
+mean_season_dates_d_hYear <- (mean_season_dates_d + 365 - hYear_start) %% 365
+
+# Calculate anomalies in onset and cessation dates
+season_dates_anomaly_s <- annual_season_dates_s - mean_season_dates_s_hYear
+season_dates_anomaly_d <- annual_season_dates_d - mean_season_dates_d_hYear
+
+# Calculate average season lengths and merge
+mean_length_s <- mean_season_dates_s_hYear[[2]] - mean_season_dates_s_hYear[[1]]
+mean_length_d <- (mean_season_dates_d_hYear[[c(2,4)]] - mean_season_dates_d_hYear[[c(1,3)]])
+
+```
+
+Explore data and identify issues/errors:
+
+
+```{r eda, eval = FALSE}
+
+# summary(seasonal_anomalies_s)
+# summary(seasonal_anomalies_d)
+
+# Single season onset dates
+onset_anomaly_s <- season_dates_anomaly_s[[grepl("onset", names(season_dates_anomaly_s))]]
+
+a <- sum(values(onset_anomaly_s < -60) | values(onset_anomaly_s > mean_length_s), na.rm = TRUE)
+b <- sum(!is.na(values(onset_anomaly_s)))
+print("Single season onset")
+a/b
+
+# Double season onset dates
+onset_anomaly_d <- season_dates_anomaly_d[[grepl("onset", names(season_dates_anomaly_d))]]
+
+c <- sum(values(onset_anomaly_d < -60) | values(onset_anomaly_d > mean_length_d), na.rm = TRUE)
+d <- sum(!is.na(values(onset_anomaly_d)))
+print("Double season onset")
+c/d
+
+# Single season cessation dates
+cessation_anomaly_s <- season_dates_anomaly_s[[grepl("cessation", names(season_dates_anomaly_s))]]
+
+# summary(cessation_anomaly)
+e <- sum(values(cessation_anomaly_s + mean_length_s < 0) | values(cessation_anomaly_s > 60), na.rm = TRUE)
+f <- sum(!is.na(values(cessation_anomaly_s)))
+print("Single season cessation")
+e/f
+
+# Double season cessation dates
+cessation_anomaly_d <- season_dates_anomaly_d[[grepl("cessation", names(season_dates_anomaly_d))]]
+
+# summary(cessation_anomaly)
+g <- sum(values(cessation_anomaly_d + mean_length_d < 0) | values(cessation_anomaly_d > 60), na.rm = TRUE)
+h <- sum(!is.na(values(cessation_anomaly_d)))
+print("Double season cessation")
+g/h
+
+# Identify pixels that have values outside the expected range
+
+onset_error_pixels <- sum(onset_anomaly_s < -60 | onset_anomaly_s > 60)
+cessation_error_pixels <- sum(cessation_anomaly_s < -60 | cessation_anomaly_s > 60)
+onset_error_pixels_d <- sum(onset_anomaly_d < -60 | onset_anomaly_d > 60)
+cessation_error_pixels_d <- sum(cessation_anomaly_d < -60 | cessation_anomaly_d > 60)
+
+all_onset_errors <- merge(onset_error_pixels, onset_error_pixels_d)
+all_cessation_errors <- merge(cessation_error_pixels, cessation_error_pixels_d)
+
+plot(all_onset_errors)
+lines(africa)
+plot(all_cessation_errors)
+lines(africa)
+
+```
+
+Remove pixels/seasons where onset/cessation dates have not been properly
+identified:
+
+```{r date_anomaly_pre_processing}
+
+# Create a mask for removing seasons/years where:
+# (i) estimated onset is < 60 days before mean onset
+# (ii) estimated cessation is > 60 days after mean cessation
+# (iii) estimated onset is after mean cessation
+# (iv) estimated cessation is before mean onset
+
+anomaly_mask_s <- (onset_anomaly_s >= -60 &
+                          onset_anomaly_s < mean_length_s) & 
+                       (cessation_anomaly_s + mean_length_s > 0 &
+                          cessation_anomaly_s <= 60)
+
+anomaly_mask_d <- (onset_anomaly_d >= -60 &
+                          onset_anomaly_d <= mean_length_d) & 
+                       (cessation_anomaly_d + mean_length_d > 0 &
+                          cessation_anomaly_d <= 60)
+
+# Fully mask pixels where more than 25% of years/seasons include NAs
+lack_of_data_s <- 
+  (sum(anomaly_mask_s) > nlyr(anomaly_mask_s) * 0.75)
+lack_of_data_d <- 
+  (sum(anomaly_mask_d) > nlyr(anomaly_mask_d) * 0.75)
+
+lack_of_data <- merge(lack_of_data_s, lack_of_data_d)
+
+# Apply masks
+
+NA_mask <- function(rast, double = FALSE) {
+  if(double) {
+    anomaly_mask <- anomaly_mask_d
+  } else {
+    anomaly_mask <- anomaly_mask_s
+  }
+  
+  rast %>%
+    mask(anomaly_mask, maskvalues = c(0, NA)) %>%
+    mask(lack_of_data, maskvalues = c(0, NA))
+}
+
+onset_anomaly_s_masked <- NA_mask(onset_anomaly_s)
+cessation_anomaly_s_masked <- NA_mask(cessation_anomaly_s)
+onset_anomaly_d_masked <- NA_mask(onset_anomaly_d, double = TRUE)
+cessation_anomaly_d_masked <- NA_mask(cessation_anomaly_d, double = TRUE)
+
+# Apply the same mask to the raw season onset/cessation layers
+
+onset_dates_s <- annual_season_dates_s[[grepl("onset", names(annual_season_dates_s))]] %>%
+  NA_mask()
+cessation_dates_s <- annual_season_dates_s[[grepl("cessation", names(annual_season_dates_s))]] %>%
+  NA_mask()
+
+onset_dates_d <- annual_season_dates_d[[grepl("onset", names(annual_season_dates_d))]] %>%
+  NA_mask(double = TRUE)
+cessation_dates_d <- annual_season_dates_d[[grepl("cessation", names(annual_season_dates_d))]] %>%
+  NA_mask(double = TRUE)
+
+# summary(onset_anomaly_s_masked)
+# summary(cessation_anomaly_s_masked)
+# summary(onset_anomaly_d_masked)
+# summary(cessation_anomaly_d_masked)
+
+```
+
+After masking, calculate key long-term metrics and combine single and double
+into a single layer:
+
+```{r seasonal_metrics}
+
+# Overall mean season length
+mean_length_d_combined = sum(mean_length_d, na.rm = T)
+mean_length_all = merge(mean_length_s, mean_length_d_combined)
+
+# Calculate total season lengths and merge
+annual_length_s <- cessation_dates_s - onset_dates_s
+
+# For double, sum individual season lengths for each year
+season_length_d <- cessation_dates_d - onset_dates_d
+
+annual_length_d <- season_length_d[[seq(1, nlyr(season_length_d)-1, 2)]] +
+  season_length_d[[seq(2, nlyr(season_length_d), 2)]]
+
+annual_length_all <- merge(annual_length_s, annual_length_d)
+
+names(annual_length_all) <- paste0("season_length_", 2001:2019)
+
+# Standard deviation of onset, cessation and length
+# Need to define a function to calculate SD that tolerates NA values while
+# returning NA for fully masked pixels
+
+season_sd <- function(x) {
+  if(all(is.na(x))) {
+    NA
+  } else {
+    sd(x, na.rm = TRUE)
+  }
+}
+
+# Apply to relevant spatRasters
+season_length_sd <- app(annual_length_all, fun = season_sd)
+
+# Calculate onset sd
+season_onset_sd_s <- app(onset_anomaly_s_masked, fun = season_sd)
+season_onset_sd_d <- app(onset_anomaly_d_masked, fun = season_sd)
+season_onset_sd <- merge(season_onset_sd_s, season_onset_sd_d)
+
+```
+
+Export data:
+
+```{r export}
+
+# Export as data layers for use in modelling
+writeRaster(mean_length_all, here("data", "processed", "raster",
+                                  "season_length_mean.tif"),
+            overwrite = TRUE)
+
+writeRaster(season_length_sd, here("data", "processed", "raster",
+                                   "season_length_sd.tif"),
+            overwrite = TRUE)
+writeRaster(season_onset_sd, here("data", "processed", "raster",
+                                   "season_onset_sd.tif"),
+            overwrite = TRUE)
+
+# Export annual season lengths
+writeRaster(annual_length_all, here("data", "processed", "raster",
+                                    "season_length_annual.tif"),
+            overwrite = TRUE)
+
+plot(annual_length_all[[1:4]], breaks = seq(0, 360, 30))
+
+```
+
