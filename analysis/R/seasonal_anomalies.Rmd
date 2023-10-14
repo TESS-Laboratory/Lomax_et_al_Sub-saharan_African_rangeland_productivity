@@ -115,6 +115,10 @@ mean_season_dates_d_hYear <- (mean_season_dates_d + 365 - hYear_start) %% 365
 season_dates_anomaly_s <- annual_season_dates_s - mean_season_dates_s_hYear
 season_dates_anomaly_d <- annual_season_dates_d - mean_season_dates_d_hYear
 
+# Calculate average season lengths and merge
+mean_length_s <- mean_season_dates_s_hYear[[2]] - mean_season_dates_s_hYear[[1]]
+mean_length_d <- (mean_season_dates_d_hYear[[c(2,4)]] - mean_season_dates_d_hYear[[c(1,3)]])
+
 ```
 
 Explore data and identify issues/errors:
@@ -128,7 +132,7 @@ Explore data and identify issues/errors:
 # Single season onset dates
 onset_anomaly_s <- season_dates_anomaly_s[[grepl("onset", names(season_dates_anomaly_s))]]
 
-a <- sum(values(onset_anomaly_s) < -60 | values(onset_anomaly_s) > 60, na.rm = TRUE)
+a <- sum(values(onset_anomaly_s < -60) | values(onset_anomaly_s > mean_length_s), na.rm = TRUE)
 b <- sum(!is.na(values(onset_anomaly_s)))
 print("Single season onset")
 a/b
@@ -136,8 +140,7 @@ a/b
 # Double season onset dates
 onset_anomaly_d <- season_dates_anomaly_d[[grepl("onset", names(season_dates_anomaly_d))]]
 
-
-c <- sum(values(onset_anomaly_d) < -45 | values(onset_anomaly_d) > 45, na.rm = TRUE)
+c <- sum(values(onset_anomaly_d < -60) | values(onset_anomaly_d > mean_length_d), na.rm = TRUE)
 d <- sum(!is.na(values(onset_anomaly_d)))
 print("Double season onset")
 c/d
@@ -146,7 +149,7 @@ c/d
 cessation_anomaly_s <- season_dates_anomaly_s[[grepl("cessation", names(season_dates_anomaly_s))]]
 
 # summary(cessation_anomaly)
-e <- sum(values(cessation_anomaly_s) < -60 | values(cessation_anomaly_s) > 60, na.rm = TRUE)
+e <- sum(values(cessation_anomaly_s + mean_length_s < 0) | values(cessation_anomaly_s > 60), na.rm = TRUE)
 f <- sum(!is.na(values(cessation_anomaly_s)))
 print("Single season cessation")
 e/f
@@ -155,7 +158,7 @@ e/f
 cessation_anomaly_d <- season_dates_anomaly_d[[grepl("cessation", names(season_dates_anomaly_d))]]
 
 # summary(cessation_anomaly)
-g <- sum(values(cessation_anomaly_d) < -45 | values(cessation_anomaly_d) > 45, na.rm = TRUE)
+g <- sum(values(cessation_anomaly_d + mean_length_d < 0) | values(cessation_anomaly_d > 60), na.rm = TRUE)
 h <- sum(!is.na(values(cessation_anomaly_d)))
 print("Double season cessation")
 g/h
@@ -164,8 +167,8 @@ g/h
 
 onset_error_pixels <- sum(onset_anomaly_s < -60 | onset_anomaly_s > 60)
 cessation_error_pixels <- sum(cessation_anomaly_s < -60 | cessation_anomaly_s > 60)
-onset_error_pixels_d <- sum(onset_anomaly_d < -45 | onset_anomaly_d > 45)
-cessation_error_pixels_d <- sum(cessation_anomaly_d < -45 | cessation_anomaly_d > 45)
+onset_error_pixels_d <- sum(onset_anomaly_d < -60 | onset_anomaly_d > 60)
+cessation_error_pixels_d <- sum(cessation_anomaly_d < -60 | cessation_anomaly_d > 60)
 
 all_onset_errors <- merge(onset_error_pixels, onset_error_pixels_d)
 all_cessation_errors <- merge(cessation_error_pixels, cessation_error_pixels_d)
@@ -182,16 +185,21 @@ identified:
 
 ```{r date_anomaly_pre_processing}
 
-# Create a mask for removing seasons/years where one date is undetermined
+# Create a mask for removing seasons/years where:
+# (i) estimated onset is < 60 days before mean onset
+# (ii) estimated cessation is > 60 days after mean cessation
+# (iii) estimated onset is after mean cessation
+# (iv) estimated cessation is before mean onset
+
 anomaly_mask_s <- (onset_anomaly_s >= -60 &
-                          onset_anomaly_s <= 60) & 
-                       (cessation_anomaly_s >= -60 &
+                          onset_anomaly_s < mean_length_s) & 
+                       (cessation_anomaly_s + mean_length_s > 0 &
                           cessation_anomaly_s <= 60)
 
-anomaly_mask_d <- (onset_anomaly_d >= -45 &
-                          onset_anomaly_d <= 45) & 
-                       (cessation_anomaly_d >= -45 &
-                          cessation_anomaly_d <= 45)
+anomaly_mask_d <- (onset_anomaly_d >= -60 &
+                          onset_anomaly_d <= mean_length_d) & 
+                       (cessation_anomaly_d + mean_length_d > 0 &
+                          cessation_anomaly_d <= 60)
 
 # Fully mask pixels where more than 25% of years/seasons include NAs
 lack_of_data_s <- 
@@ -244,22 +252,22 @@ into a single layer:
 
 ```{r seasonal_metrics}
 
-# Calculate average season lengths and merge
-mean_length_s <- mean_season_dates_s_hYear[[2]] - mean_season_dates_s_hYear[[1]]
-mean_length_d <- (mean_season_dates_d_hYear[[c(2,4)]] - mean_season_dates_d_hYear[[c(1,3)]]) %>%
-  sum()
-
-mean_length <- merge(mean_length_s, mean_length_d)
+# Overall mean season length
+mean_length_d_combined = sum(mean_length_d, na.rm = T)
+mean_length_all = merge(mean_length_s, mean_length_d_combined)
 
 # Calculate total season lengths and merge
 annual_length_s <- cessation_dates_s - onset_dates_s
-season_length_d <- cessation_dates_d - onset_dates_d
 
 # For double, sum individual season lengths for each year
+season_length_d <- cessation_dates_d - onset_dates_d
+
 annual_length_d <- season_length_d[[seq(1, nlyr(season_length_d)-1, 2)]] +
   season_length_d[[seq(2, nlyr(season_length_d), 2)]]
 
 annual_length_all <- merge(annual_length_s, annual_length_d)
+
+names(annual_length_all) <- paste0("season_length_", 2001:2019)
 
 # Standard deviation of onset, cessation and length
 # Need to define a function to calculate SD that tolerates NA values while
@@ -288,10 +296,23 @@ Export data:
 ```{r export}
 
 # Export as data layers for use in modelling
-writeRaster(season_length_sd, "processed/raster/season_length_sd.tif",
+writeRaster(mean_length_all, here("data", "processed", "raster",
+                                  "season_length_mean.tif"),
             overwrite = TRUE)
-writeRaster(season_onset_sd, "processed/raster/season_onset_sd.tif",
+
+writeRaster(season_length_sd, here("data", "processed", "raster",
+                                   "season_length_sd.tif"),
             overwrite = TRUE)
+writeRaster(season_onset_sd, here("data", "processed", "raster",
+                                   "season_onset_sd.tif"),
+            overwrite = TRUE)
+
+# Export annual season lengths
+writeRaster(annual_length_all, here("data", "processed", "raster",
+                                    "season_length_annual.tif"),
+            overwrite = TRUE)
+
+plot(annual_length_all[[1:4]], breaks = seq(0, 360, 30))
 
 ```
 
