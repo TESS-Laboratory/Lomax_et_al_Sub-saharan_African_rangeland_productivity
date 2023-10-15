@@ -23,17 +23,28 @@ are calculated as the mean value of 2001-2019 annual values.
 
 ```{r setup, include=FALSE}
 
+# If running for first time, run renv::restore() to install required packages
+# renv::restore()
+
+# Data management
+
 library(tidyverse)
 library(terra)
 library(sf)
-library(tmap)
+library(here)
+
+# Analysis
+
 library(mgcv)
 library(parallel)
+library(tictoc)
+library(beepr)
+
+# Visualisation
+library(tmap)
 library(gratia)
 library(ggpubr)
 library(patchwork)
-library(beepr)
-library(here)
 
 terraOptions(tempdir = here("data", "temp", "terra"),
              memfrac = 0.8)
@@ -45,8 +56,9 @@ ggplot2::theme_set(theme_bw())
 
 tmap_options(check.and.fix = TRUE)
 
-nc <- 6 # number of cores
-cl <- makeCluster(nc)
+# Establish number of cores for parallel computing
+nc <- (detectCores() / 4)
+
 ```
 
 # Load and pre-process data
@@ -75,7 +87,7 @@ cv <- rast(here("data", "raw", "raster", "main_variables",
                 "pptCV.tif"))
 intensity <- rast(here("data", "raw", "raster", "main_variables",
                 "pptIntensity.tif"))
-dry <- rast(here("data", "raw_data", "raster", "main_variables",
+dry <- rast(here("data", "raw", "raster", "main_variables",
                 "fracDryDays.tif"))
 ugi <- rast(here("data", "raw", "raster", "main_variables",
                 "ugi.tif"))
@@ -93,8 +105,8 @@ gt30 <- rast(here("data", "raw", "raster", "main_variables",
                 "pptExceed_30.tif"))
 
 # CHIRPS season length and onset data 
-season_length <- rast(here("data", "raw", "raster", "season_variables",
-                           "season_length_all.tif"))
+season_length <- rast(here("data", "processed", "raster",
+                           "season_length_mean.tif"))
 season_length_sd <- rast(here("data", "processed", "raster",
                               "season_length_sd.tif"))
 season_onset_sd <- rast(here("data", "processed", "raster",
@@ -102,8 +114,6 @@ season_onset_sd <- rast(here("data", "processed", "raster",
 
 # ERA5-Land mean air temperature
 tMean <- rast(here("data", "raw", "raster", "main_variables", "tMean.tif"))
-
-# tMean_resample <- disagg(tMean, 2, method = "bilinear")
 
 # MODIS fire frequency 2001-2019
 fire <- rast(here("data", "raw", "raster", "main_variables", "modisBurnFreq.tif")) %>%
@@ -121,7 +131,7 @@ ai <- rast(here("data", "raw", "raster", "study_area_masks",
 
 # MODIS land cover classification IGBP
 igbp <- rast(here("data", "raw", "raster", "study_area_masks",
-                  "IGBPLandCover.tif"))
+                  "igbpLandCover.tif"))
 
 # ESA WorldCover 10m land cover masks (2020)
 # Additional higher-resolution layers excluding urban, cropland and forested land
@@ -129,6 +139,8 @@ esa_other <- rast(here("data", "raw", "raster", "study_area_masks",
                   "esaLcFrac.tif"))
 esa_woody <- rast(here("data", "raw", "raster", "study_area_masks",
                   "esaWoodyFrac.tif"))
+esa_tree <- rast(here("data", "raw", "raster", "study_area_masks",
+                  "esaTreeFrac.tif"))
 
 # Zero mask (remove pixels where more than 25% of sub-pixels are zero for all
 # years in the dataset)
@@ -163,12 +175,12 @@ keys <- na.omit(unique(x))
 keys[which.max(tabulate(match(x, keys)))]
 }
 
-igbp_mode <- app(igbp_mask, getMode)
-
-# Write and read modal IGBP class layer (slow to calculate)
-writeRaster(igbp_mode, here("data", "processed", "raster",
-                            "igbp_mode.tif"),
-            overwrite = TRUE)
+# igbp_mode <- app(igbp_mask, getMode)
+# 
+# # Write and read modal IGBP class layer (slow to calculate)
+# writeRaster(igbp_mode, here("data", "processed", "raster",
+#                             "igbp_mode.tif"),
+#             overwrite = TRUE)
 
 igbp_mode <- rast(here("data", "processed", "raster",
                        "igbp_mode.tif"))
@@ -179,8 +191,11 @@ ai_mask <- (ai > 500 & ai < 6500)
 # ESA masks (exclude > 25% non-rangeland or > 50% tree cover)
 esa_mask <- (esa_other < 0.25) & (esa_tree < 0.5)
 
+# Invalid season identification mask (remove values with NA for season onset sd)
+season_na_mask <- !is.na(season_onset_sd)
+
 # Combine masks
-study_area_mask <- igbp_mode & ai_mask & esa_mask & zero_mask
+study_area_mask <- igbp_mode & ai_mask & esa_mask & zero_mask & season_na_mask
 
 # Study area mask function
 sa_mask <- function(spatRaster) {
@@ -214,7 +229,7 @@ var_stack_masked <- sa_mask(var_stack)
 
 Convert whole raster to data frame
 
-```{r to_df, cache = F, dependson = c("load", "mask"), include = FALSE}
+```{r to_df, include = FALSE}
 
 df <- as.data.frame(var_stack_masked, xy = TRUE) %>%
   left_join(igbp_index)
@@ -526,7 +541,7 @@ tmap_save(multi_plot,
 
 Calculate correlation matrix for all variables in dataset:
 
-```{r correlation}
+```{r correlation, eval = FALSE}
 
 cor_matrix = df %>%
   dplyr::select(gpp,map,cv,intensity,dry_days,ugi,pci,pc95,wet95,gt10,gt30,
@@ -564,9 +579,7 @@ other covariates, leaving the following:
 - soilN
 - sand
 - tMean
-- LST
 - fire
-
 
 # GAMs
 
@@ -584,35 +597,37 @@ covariates.
 To prepare for GAM modelling, we select only covariates retained from correlation
 analysis above.
 
-```{r gam_prep, cache = F, dependson = c("load", "mask", "to_df")}
+```{r gam_prep, include = FALSE}
 
 # Select model variables and scale some to more consistent units (0-1)
-df_model <- df %>%
-  dplyr::select(x, y, gpp, map, cv, ugi, season, onset_sd, intensity, wet95,
-                soilN, sand, tMean, fire)%>%
-  filter(season > 0) %>%    # Remove pixels with season length == 0 (errors)
-  mutate(gpp = gpp * 0.001,
-         sand = sand * 0.01,
-         map = map * 0.001,
-         cv = cv * 0.01)
+# df_model <- df %>%
+#   dplyr::select(x, y, gpp, map, cv, ugi, season, onset_sd, intensity, wet95,
+#                 soilN, sand, tMean, fire)%>%
+#   filter(season > 0) %>%    # Remove pixels with season length == 0 (errors)
+#   mutate(gpp = gpp * 0.001,
+#          sand = sand * 0.01,
+#          map = map * 0.001,
+#          cv = cv * 0.01)
 
 # Write intermediate CSV for modelling
 
 # write_csv(df_model,
-#           here("data", "processed_data", "csv", "df_model.csv"))
-# df_model <- read_csv(here("data", "processed_data", "csv", "df_model.csv"))
+#           here("data", "processed", "csv", "df_model.csv"))
+df_model <- read_csv(here("data", "processed", "csv", "df_model.csv"))
 
 ```
 
 Non-spatial model including all covariates
 
-```{r gam_1, cache = F, dependson = c("load", "mask", "to_df", "gam_prep")}
+```{r non_spatial_model_fit, eval = FALSE}
 
-t1 <- Sys.time()
+cl <- makeCluster(nc)
+
+tic()
 mod1 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
               s(ugi, k = 8, bs = "ts") +
-              s(season, k = 12, bs = "ts") + s(onset_sd, k = 8, bs = "ts") +
-              s(wet95, k = 6, bs = "ts") + s(intensity, k = 8, bs = "ts") +
+              s(season, k = 12, bs = "ts") + s(onset_sd, k = 12, bs = "ts") +
+              s(wet95, k = 8, bs = "ts") + s(intensity, k = 8, bs = "ts") +
               s(soilN, k = 8, bs = "ts") + s(sand, k = 6, bs = "ts") +
               s(tMean, k = 8, bs = "ts") +
               s(fire, k = 8, bs = "ts"),
@@ -620,13 +635,21 @@ mod1 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
             method = "REML",
             family = Gamma(link = "log"),
             select = TRUE,
-            cluster = nc)
-t2 <- Sys.time()
-t2 - t1
+            samfrac = 0.1,
+            cluster = cl)
+toc()
 
-# # Save/load model results
-# saveRDS(mod1, "processed_data/models/mod1.rds")
-# mod1 <- readRDS("processed_data/models/mod1.rds")
+stopCluster(cl)
+
+# Save model results
+write_rds(mod1, here("data", "processed", "models", "mod1.rds"))
+
+
+```
+
+```{r non_spatial_model_vis}
+
+mod1 <- read_rds(here("data", "processed", "models", "mod1.rds"))
 
 # Model 1 results
 summary(mod1)
@@ -637,9 +660,8 @@ gam.check(mod1)
 # concurvity(mod1)
 # (concurvity(mod1, full = FALSE)$estimate)
 
-beep(3)
-
 ```
+
 
 This model greatly improves the overall fit. A remarkable 84% of deviance is
 explained by the model, and the structure of the residuals is slightly improved.
@@ -652,15 +674,16 @@ independent.
 Now I add the spatial term to account for the spatial structure in the model
 residuals.
 
-```{r gam_2, cache = F, dependson = c("load", "mask", "to_df", "gam_prep")}
+```{r spatial_model_fit, eval = FALSE}
+
+cl <- makeCluster(nc)
 
 # Spatial model - high smoothing (k = c(8,8) for spatial term)
-Sys.time()
-t1 <- Sys.time()
+tic()
 mod2_k8 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
               s(ugi, k = 8, bs = "ts") +
               s(season, k = 12, bs = "ts") + s(onset_sd, k = 8, bs = "ts") +
-              s(wet95, k = 6, bs = "ts") + s(intensity, k = 8, bs = "ts") +
+              s(wet95, k = 8, bs = "ts") + s(intensity, k = 8, bs = "ts") +
               s(soilN, k = 8, bs = "ts") + s(sand, k = 6, bs = "ts") +
               s(tMean, k = 8, bs = "ts") +
               s(fire, k = 8, bs = "ts") +
@@ -668,20 +691,19 @@ mod2_k8 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
             data = df_model,
             method = "REML",
             family = Gamma(link = "log"),
+            samfrac = 0.1,
             select = TRUE,
-            cluster = nc)
-t2 <- Sys.time()
-t2 - t1
+            cluster = cl)
+toc()
 
-beep(5)
+write_rds(mod2_k8, here("data", "processed", "models", "mod2_k8.rds"))
 
 # Spatial model - medium smoothing (k = c(12,12) for spatial term)
-Sys.time()
-t1 <- Sys.time()
+tic()
 mod2_k12 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
               s(ugi, k = 8, bs = "ts") +
               s(season, k = 12, bs = "ts") + s(onset_sd, k = 8, bs = "ts") +
-              s(wet95, k = 6, bs = "ts") + s(intensity, k = 8, bs = "ts") +
+              s(wet95, k = 8, bs = "ts") + s(intensity, k = 8, bs = "ts") +
               s(soilN, k = 8, bs = "ts") + s(sand, k = 6, bs = "ts") +
               s(tMean, k = 8, bs = "ts") +
               s(fire, k = 8, bs = "ts") +
@@ -690,20 +712,19 @@ mod2_k12 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
             method = "REML",
             family = Gamma(link = "log"),
             select = TRUE,
-            cluster = nc)
-t2 <- Sys.time()
-t2 - t1
+            samfrac = 0.1,
+            cluster = cl)
+toc()
 
-beep(5)
+write_rds(mod2_k12, here("data", "processed", "models", "mod2_k12.rds"))
 
 # Spatial model - low smoothing (k = c(16,16) for spatial term)
 
-Sys.time()
-t1 <- Sys.time()
+tic()
 mod2_k16 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
               s(ugi, k = 8, bs = "ts") +
               s(season, k = 12, bs = "ts") + s(onset_sd, k = 8, bs = "ts") +
-              s(wet95, k = 6, bs = "ts") + s(intensity, k = 8, bs = "ts") +
+              s(wet95, k = 8, bs = "ts") + s(intensity, k = 8, bs = "ts") +
               s(soilN, k = 8, bs = "ts") + s(sand, k = 6, bs = "ts") +
               s(tMean, k = 8, bs = "ts") +
               s(fire, k = 8, bs = "ts") +
@@ -712,20 +733,23 @@ mod2_k16 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
             method = "REML",
             family = Gamma(link = "log"),
             select = TRUE,
-            cluster = nc)
-t2 <- Sys.time()
-t2 - t1
+            samfrac = 0.1,
+            cluster = cl)
+toc()
 
-beep(3)
+write_rds(mod2_k16, here("data", "processed", "models", "mod2_k16.rds"))
 
-# # Save/load model results
 
-# saveRDS(mod2_k8, "processed_data/models/mod2_k8.rds")
-# saveRDS(mod2_k12, "processed_data/models/mod2_k12.rds")
-# saveRDS(mod2_k16, "processed_data/models/mod2_k16.rds")
-# mod2_k8 <- readRDS("processed_data/models/mod2_k8.rds")
-# mod2_k12 <- readRDS("processed_data/models/mod2_k12.rds")
-# mod2_k16 <- readRDS("processed_data/models/mod2_k16.rds")
+```
+
+
+```{r spatial_model_vis}
+
+# Load model results
+
+mod2_k8 <- read_rds(here("data", "processed", "models", "mod2_k8.rds"))
+mod2_k12 <- read_rds(here("data", "processed", "models", "mod2_k12.rds"))
+mod2_k16 <- read_rds(here("data", "processed", "models", "mod2_k16.rds"))
 
 # Model 2 results
 
@@ -743,10 +767,8 @@ gam.check(mod2_k12)
 print("Spatial term k = 16")
 gam.check(mod2_k16)
 
-
-beep(3)
-
 ```
+
 
 The spatial models have an improved fit, with 94-96% deviance explained and a
 relatively symmetrical distribution of residuals (with some outliers).
@@ -758,7 +780,7 @@ relatively symmetrical distribution of residuals (with some outliers).
 
 # Set plot output directory
 
-plot_dir <- "figures/"
+plot_dir <- here("results", "figures")
 
 theme_set(theme_classic())
 
@@ -798,7 +820,7 @@ mod_smooths <- bind_rows(mod1_smooths,
 
 # Read in data labels lookup table
 
-var_labels <- read_csv("csv/var_labels.csv")
+var_labels <- read_csv(here("data", "raw", "csv", "var_labels.csv"))
 
 var_list <- var_labels$vars
 
@@ -857,7 +879,7 @@ plots <- map(var_list, function(var) {
 gam_plot <- ggarrange(plotlist = plots, ncol = 3, nrow = 4, common.legend = TRUE)
 
 # Save spatial term map
-ggsave(paste0(plot_dir, "main_gam_plot.jpg"),
+ggsave(here(plot_dir, "main_gam_plot.jpg"),
        plot = gam_plot,
        width = 20, height = 30, units = "cm", dpi = 300)
 
@@ -892,7 +914,7 @@ africa_basemap <- tm_shape(africa) + tm_borders() +
 outside_sa <- mask(study_area_mask, study_area_mask, maskvalues = c(1, NA))
 
 sa_basemap_2 <- tm_shape(outside_sa) +
-  tm_raster(col = "values", palette = "grey75", legend.show = FALSE)
+  tm_raster(palette = "grey75", legend.show = FALSE)
 
 rast_plot <- tm_shape(spatial_rast) +
   tm_raster(palette = "RdYlBu", breaks = c(-2, -1, 0, 1, 2), style = "cont",
@@ -902,7 +924,7 @@ rast_plot <- tm_shape(spatial_rast) +
 
 # Save spatial term map
 tmap_save(rast_plot,
-          paste0(plot_dir, "spatial_term.jpg"),
+          here(plot_dir, "spatial_term.jpg"),
           width = 16, height = 12, units = "cm", dpi = 300)
 
 
@@ -916,22 +938,22 @@ Model diagnostic and residual plots
 # Model diagnostic plots
 
 mod1_diag <- appraise(mod1, n_bins = 60, point_alpha = 0.05, line_col = "#888888")
-ggsave(paste0(plot_dir, "mod1_diag_plot.jpg"),
+ggsave(here(plot_dir, "mod1_diag_plot.jpg"),
        plot = mod1_diag,
        width = 20, height = 16, units = "cm", dpi = 300)
 
 mod2_k8_diag <- appraise(mod2_k8, n_bins = 60, point_alpha = 0.05, line_col = "#117733")
-ggsave(paste0(plot_dir, "mod2_k8_diag_plot.jpg"),
+ggsave(here(plot_dir, "mod2_k8_diag_plot.jpg"),
        plot = mod2_k8_diag,
        width = 20, height = 16, units = "cm", dpi = 300)
 
 mod2_k12_diag <- appraise(mod2_k8, n_bins = 60, point_alpha = 0.05, line_col = "#117733")
-ggsave(paste0(plot_dir, "mod2_k12_diag_plot.jpg"),
+ggsave(here(plot_dir, "mod2_k12_diag_plot.jpg"),
        plot = mod2_k12_diag,
        width = 20, height = 16, units = "cm", dpi = 300)
 
 mod2_k16_diag <- appraise(mod2_k8, n_bins = 60, point_alpha = 0.05, line_col = "#117733")
-ggsave(paste0(plot_dir, "mod2_k16_diag_plot.jpg"),
+ggsave(here(plot_dir, "mod2_k16_diag_plot.jpg"),
        plot = mod2_k16_diag,
        width = 20, height = 16, units = "cm", dpi = 300)
 
@@ -949,7 +971,7 @@ resid_plot <- tm_shape(resid_raster) +
   africa_basemap
 
 tmap_save(resid_plot,
-          paste0(plot_dir, "mod2_resid_map.jpg"),
+          here(plot_dir, "mod2_resid_map.jpg"),
           width = 16, height = 12, unit = "cm", dpi = 300)
 
 ```

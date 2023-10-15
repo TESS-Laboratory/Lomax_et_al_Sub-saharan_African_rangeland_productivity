@@ -124,7 +124,7 @@ mean_length_d <- (mean_season_dates_d_hYear[[c(2,4)]] - mean_season_dates_d_hYea
 Explore data and identify issues/errors:
 
 
-```{r eda, eval = FALSE}
+```{r eda}
 
 # summary(seasonal_anomalies_s)
 # summary(seasonal_anomalies_d)

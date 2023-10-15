@@ -1,6 +1,6 @@
 vars,label,parse
 map,MAP ~ (mm ~ yr^-1),1
-meanT,Mean air temperature (°C),0
+tMean,Mean air temperature (°C),0
 cv,Interannual CV,0
 season,Season length (d),0
 onset_sd,SD of season onset (d),0
