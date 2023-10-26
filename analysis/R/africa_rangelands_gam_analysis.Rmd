@@ -103,6 +103,8 @@ gt20 <- rast(here("data", "raw", "raster", "main_variables",
                 "pptExceed_20.tif"))
 gt30 <- rast(here("data", "raw", "raster", "main_variables",
                 "pptExceed_30.tif"))
+mean_day_sd <- rast(here("data", "raw", "raster", "main_variables",
+                         "pptMeanDaySD.tif"))
 
 # CHIRPS season length and onset data 
 season_length <- rast(here("data", "processed", "raster",
@@ -211,7 +213,7 @@ var_stack <- c(igbp_mode,
                gpp_mean,
                soil, fire, tMean,
                map, cv, intensity, dry, ugi, pc_95, wet_95,
-               gt10, gt20, gt30,
+               gt10, gt20, gt30, mean_day_sd,
                pci, season_length, season_length_sd, season_onset_sd, sr[[3]])
 
 names(var_stack) <- c("lc",
@@ -220,7 +222,7 @@ names(var_stack) <- c("lc",
                       "fire", "tMean",
                       "map", "cv", "intensity", "dry_days", "ugi",
                       "pc95", "wet95",
-                      "gt10", "gt20", "gt30",
+                      "gt10", "gt20", "gt30", "mean_day_sd",
                       "pci", "season", "season_sd", "onset_sd", "sr")
 
 var_stack_masked <- sa_mask(var_stack)
@@ -252,9 +254,10 @@ Variable definitions:
 |intensity|Mean intensity of rainfall on a rainy day|mm day-1|CHIRPS|
 |pc95|Fraction of daily rainfall above 95th percentile of all days|unitless 0-1|CHIRPS|
 |wet95|Fraction of daily rainfall above 95th percentile of wet days|unitless 0-1|CHIRPS|
-|gt10|Fraction of days per year with >10 mm rainfall|
-|gt20|Fraction of days per year with >20 mm rainfall|
-|gt30|Fraction of days per year with >30 mm rainfall|
+|gt10|Fraction of days per year with >10 mm rainfall|unitless 0-1|CHIRPS|
+|gt20|Fraction of days per year with >20 mm rainfall|unitless 0-1|CHIRPS|
+|gt30|Fraction of days per year with >30 mm rainfall|unitless 0-1|CHIRPS|
+|mean_day_sd|Standard deviation in the mean date of rainfall|days|CHIRPS|
 |ugi|Unranked Gini index of daily precipitation|unitless 0-1|CHIRPS|
 |pci|Precipitation concentration index|unitless 0-1|CHIRPS|
 |-------------|----------|----|
@@ -545,18 +548,18 @@ Calculate correlation matrix for all variables in dataset:
 
 cor_matrix = df %>%
   dplyr::select(gpp,map,cv,intensity,dry_days,ugi,pci,pc95,wet95,gt10,gt30,
-         season,onset_sd,sand,clay,soilN,soilP,tMean,fire) %>%
+                mean_day_sd,season,onset_sd,sand,clay,soilN,soilP,tMean,fire) %>%
   cor(method = "spearman", use="pairwise.complete.obs")
 
 var_names <- c("GPP", "MAP", "CV", "SDII", "dry", "UGi", "PCI", ":F[95]",
-               ":F['95w']", ":D['10mm']", ":D['30mm']", "season", ":sigma[onset]",
-               "sand", "clay", "soilN", "soilP", "tMean", "fire")
+               ":F['95w']", ":D['10mm']", ":D['30mm']", "meanDaySD", "season",
+               ":sigma[onset]","sand", "clay", "soilN", "soilP", "tMean", "fire")
 colnames(cor_matrix) <- var_names
 rownames(cor_matrix) <- var_names
 
 # Save correlation plot figure to directory
 
-png(paste0(plot_dir, "/cor_plot.png"),
+png(here(plot_dir, "cor_plot_2.png"),
      height = 50, width = 50, units = "cm", res = 300)
 
 corrplot::corrplot(cor_matrix, method = "number", type = "upper",
@@ -574,6 +577,7 @@ other covariates, leaving the following:
 - UGi
 - season
 - sigma_onset
+- mean_day_sd
 - SDII
 - F_95w
 - soilN
@@ -600,20 +604,20 @@ analysis above.
 ```{r gam_prep, include = FALSE}
 
 # Select model variables and scale some to more consistent units (0-1)
-# df_model <- df %>%
-#   dplyr::select(x, y, gpp, map, cv, ugi, season, onset_sd, intensity, wet95,
-#                 soilN, sand, tMean, fire)%>%
-#   filter(season > 0) %>%    # Remove pixels with season length == 0 (errors)
-#   mutate(gpp = gpp * 0.001,
-#          sand = sand * 0.01,
-#          map = map * 0.001,
-#          cv = cv * 0.01)
+df_model <- df %>%
+  dplyr::select(x, y, gpp, map, cv, ugi, season, onset_sd, mean_day_sd,
+                intensity, wet95, soilN, sand, tMean, fire) %>%
+  filter(season > 0) %>%    # Remove pixels with season length == 0 (errors)
+  mutate(gpp = gpp * 0.001,
+         sand = sand * 0.01,
+         map = map * 0.001,
+         cv = cv * 0.01)
 
 # Write intermediate CSV for modelling
 
-# write_csv(df_model,
-#           here("data", "processed", "csv", "df_model.csv"))
-df_model <- read_csv(here("data", "processed", "csv", "df_model.csv"))
+write_csv(df_model,
+          here("data", "processed", "csv", "df_model.csv"))
+
 
 ```
 
@@ -621,16 +625,18 @@ Non-spatial model including all covariates
 
 ```{r non_spatial_model_fit, eval = FALSE}
 
+df_model <- read_csv(here("data", "processed", "csv", "df_model.csv"))
+
 cl <- makeCluster(nc)
 
 tic()
-mod1 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
-              s(ugi, k = 8, bs = "ts") +
+mod1 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 12, bs = "ts") +
+              s(intensity, k = 12, bs = "ts") + s(wet95, k = 12, bs = "ts") +
+              s(ugi, k = 12, bs = "ts") + s(mean_day_sd, k = 12, bs = "ts") +
               s(season, k = 12, bs = "ts") + s(onset_sd, k = 12, bs = "ts") +
-              s(wet95, k = 8, bs = "ts") + s(intensity, k = 8, bs = "ts") +
-              s(soilN, k = 8, bs = "ts") + s(sand, k = 6, bs = "ts") +
-              s(tMean, k = 8, bs = "ts") +
-              s(fire, k = 8, bs = "ts"),
+              s(soilN, k = 12, bs = "ts") + s(sand, k = 12, bs = "ts") +
+              s(tMean, k = 12, bs = "ts") +
+              s(fire, k = 12, bs = "ts"),
             data = df_model,
             method = "REML",
             family = Gamma(link = "log"),
@@ -680,13 +686,13 @@ cl <- makeCluster(nc)
 
 # Spatial model - high smoothing (k = c(8,8) for spatial term)
 tic()
-mod2_k8 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
-              s(ugi, k = 8, bs = "ts") +
-              s(season, k = 12, bs = "ts") + s(onset_sd, k = 8, bs = "ts") +
-              s(wet95, k = 8, bs = "ts") + s(intensity, k = 8, bs = "ts") +
-              s(soilN, k = 8, bs = "ts") + s(sand, k = 6, bs = "ts") +
-              s(tMean, k = 8, bs = "ts") +
-              s(fire, k = 8, bs = "ts") +
+mod2_k8 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 12, bs = "ts") +
+              s(intensity, k = 12, bs = "ts") + s(wet95, k = 12, bs = "ts") +
+              s(ugi, k = 12, bs = "ts") + s(mean_day_sd, k = 12, bs = "ts") +
+              s(season, k = 12, bs = "ts") + s(onset_sd, k = 12, bs = "ts") +
+              s(soilN, k = 12, bs = "ts") + s(sand, k = 12, bs = "ts") +
+              s(tMean, k = 12, bs = "ts") +
+              s(fire, k = 12, bs = "ts") +
               te(x, y, k = c(8, 8), bs = "ts"),
             data = df_model,
             method = "REML",
@@ -700,13 +706,13 @@ write_rds(mod2_k8, here("data", "processed", "models", "mod2_k8.rds"))
 
 # Spatial model - medium smoothing (k = c(12,12) for spatial term)
 tic()
-mod2_k12 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
-              s(ugi, k = 8, bs = "ts") +
-              s(season, k = 12, bs = "ts") + s(onset_sd, k = 8, bs = "ts") +
-              s(wet95, k = 8, bs = "ts") + s(intensity, k = 8, bs = "ts") +
-              s(soilN, k = 8, bs = "ts") + s(sand, k = 6, bs = "ts") +
-              s(tMean, k = 8, bs = "ts") +
-              s(fire, k = 8, bs = "ts") +
+mod2_k12 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 12, bs = "ts") +
+              s(intensity, k = 12, bs = "ts") + s(wet95, k = 12, bs = "ts") +
+              s(ugi, k = 12, bs = "ts") + s(mean_day_sd, k = 12, bs = "ts") +
+              s(season, k = 12, bs = "ts") + s(onset_sd, k = 12, bs = "ts") +
+              s(soilN, k = 12, bs = "ts") + s(sand, k = 12, bs = "ts") +
+              s(tMean, k = 12, bs = "ts") +
+              s(fire, k = 12, bs = "ts") +
               te(x, y, k = c(12, 12), bs = "ts"),
             data = df_model,
             method = "REML",
@@ -721,13 +727,13 @@ write_rds(mod2_k12, here("data", "processed", "models", "mod2_k12.rds"))
 # Spatial model - low smoothing (k = c(16,16) for spatial term)
 
 tic()
-mod2_k16 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 8, bs = "ts") +
-              s(ugi, k = 8, bs = "ts") +
-              s(season, k = 12, bs = "ts") + s(onset_sd, k = 8, bs = "ts") +
-              s(wet95, k = 8, bs = "ts") + s(intensity, k = 8, bs = "ts") +
-              s(soilN, k = 8, bs = "ts") + s(sand, k = 6, bs = "ts") +
-              s(tMean, k = 8, bs = "ts") +
-              s(fire, k = 8, bs = "ts") +
+mod2_k16 <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 12, bs = "ts") +
+              s(intensity, k = 12, bs = "ts") + s(wet95, k = 12, bs = "ts") +
+              s(ugi, k = 12, bs = "ts") + s(mean_day_sd, k = 12, bs = "ts") +
+              s(season, k = 12, bs = "ts") + s(onset_sd, k = 12, bs = "ts") +
+              s(soilN, k = 12, bs = "ts") + s(sand, k = 12, bs = "ts") +
+              s(tMean, k = 12, bs = "ts") +
+              s(fire, k = 12, bs = "ts") +
               te(x, y, k = c(16, 16), bs = "ts"),
             data = df_model,
             method = "REML",
@@ -973,6 +979,87 @@ resid_plot <- tm_shape(resid_raster) +
 tmap_save(resid_plot,
           here(plot_dir, "mod2_resid_map.jpg"),
           width = 16, height = 12, unit = "cm", dpi = 300)
+
+```
+
+Repeat model for separate MAP bins:
+```{r binned_models}
+
+library(future)
+library(furrr)
+
+df_model <- read_csv(here("data", "processed", "csv", "df_model.csv"))
+
+df_model_bins <- df_model %>%
+  mutate(map_bin = cut_width(map, width = 0.4, boundary = 0)) %>%
+  group_by(map_bin) %>%
+  nest() %>%
+  ungroup()
+
+fit_gam <- function(data, spatial = FALSE, spatial_k = 12) {
+  
+  if (spatial) {
+    model <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 12, bs = "ts") +
+                  s(intensity, k = 12, bs = "ts") + s(wet95, k = 12, bs = "ts") +
+                  s(ugi, k = 12, bs = "ts") + s(mean_day_sd, k = 12, bs = "ts") +
+                  s(season, k = 12, bs = "ts") + s(onset_sd, k = 12, bs = "ts") +
+                  s(soilN, k = 12, bs = "ts") + s(sand, k = 12, bs = "ts") +
+                  s(tMean, k = 12, bs = "ts") +
+                  s(fire, k = 12, bs = "ts") +
+                  te(x, y, k = c(spatial_k, spatial_k), bs = "ts"),
+              data = data,
+              method = "REML",
+              family = Gamma(link = "log"),
+              select = TRUE,
+              samfrac = 0.1)
+  } else {
+    model <- bam(gpp ~ s(map, k = 16, bs = "ts") + s(cv, k = 12, bs = "ts") +
+              s(intensity, k = 12, bs = "ts") + s(wet95, k = 12, bs = "ts") +
+              s(ugi, k = 12, bs = "ts") + s(mean_day_sd, k = 12, bs = "ts") +
+              s(season, k = 12, bs = "ts") + s(onset_sd, k = 12, bs = "ts") +
+              s(soilN, k = 12, bs = "ts") + s(sand, k = 12, bs = "ts") +
+              s(tMean, k = 12, bs = "ts") +
+              s(fire, k = 12, bs = "ts"),
+            data = data,
+            method = "REML",
+            family = Gamma(link = "log"),
+            select = TRUE,
+            samfrac = 0.1)
+  }
+  
+  model
+}
+
+# cl <- makeCluster(nc)
+plan("multisession", workers = nc)
+
+models_binned <- df_model_bins %>%
+  mutate(nsp_models = future_map(data, fit_gam, spatial = FALSE),
+         sp_models_k8 = future_map(data, fit_gam, spatial = TRUE, spatial_k = 8),
+         sp_model_k12 = future_map(data, fit_gam, spatial = TRUE, spatial_k = 12),
+         sp_model_k16 = future_map(data, fit_gam, spatial = TRUE, spatial_k = 16))
+
+# stopCluster(cl)
+
+write_rds(models_binned, here("results", "rds", "binned_models.rds"))
+
+
+```
+
+
+Visualise binned models:
+
+```{r binned_models_viz}
+
+models_binned <- read_rds(here("results", "rds", "binned_models.rds"))
+
+# Drop final row (1600-2000 mm yr-1) - insufficient rows for model fitting
+models_binned_cut <- models_binned[1:4,]
+head(models_binned_cut)
+
+plot_gam <- function(gam) {
+  plot(gam, pages = 3, seWithMean = T, scheme = 2)
+}
 
 ```
 
