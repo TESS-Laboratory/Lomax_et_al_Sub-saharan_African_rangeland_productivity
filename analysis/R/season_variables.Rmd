@@ -267,7 +267,33 @@ annual_length_d <- season_length_d[[seq(1, nlyr(season_length_d)-1, 2)]] +
 
 annual_length_all <- merge(annual_length_s, annual_length_d)
 
-names(annual_length_all) <- paste0("season_length_", 2001:2019)
+names(annual_length_all) <- paste0("seasonLength_", 2001:2019)
+
+# Annual onset date anomaly
+
+mean_onset_date_s <- mean_season_dates_s_hYear[["onset"]]
+mean_onset_date_d1 <- mean_season_dates_d_hYear[["onset1"]]
+mean_onset_date_d2 <- mean_season_dates_d_hYear[["onset2"]]
+
+onset_dates_d1 <- onset_dates_d[[seq(1, nlyr(season_length_d)-1, 2)]]
+onset_dates_d2 <- onset_dates_d[[seq(2, nlyr(season_length_d), 2)]]
+
+onset_date_anomaly_s <- mean_onset_date_s - onset_dates_s
+onset_date_anomaly_d1 <- mean_onset_date_d1 - onset_dates_d1
+onset_date_anomaly_d2 <- mean_onset_date_d2 - onset_dates_d2
+
+# Mask onset anomalies > 60 days
+
+onset_anomaly_mask <- merge(
+  (abs(onset_date_anomaly_s) <= 60),
+  (abs(onset_date_anomaly_d1) <= 60 & abs(onset_date_anomaly_d2) <= 60)
+)
+
+onset_anomaly_d <- mean(onset_date_anomaly_d1, onset_date_anomaly_d2)
+
+onset_anomaly_all <- onset_date_anomaly_s %>%
+  merge(onset_date_anomaly_d) %>%
+  mask(onset_anomaly_mask, maskvalues = c(0,NA))
 
 # Standard deviation of onset, cessation and length
 # Need to define a function to calculate SD that tolerates NA values while
@@ -307,12 +333,16 @@ writeRaster(season_onset_sd, here("data", "processed", "raster",
                                    "season_onset_sd.tif"),
             overwrite = TRUE)
 
-# Export annual season lengths
+# Export annual season lengths and season start anomalies
 writeRaster(annual_length_all, here("data", "processed", "raster",
                                     "season_length_annual.tif"),
             overwrite = TRUE)
 
-plot(annual_length_all[[1:4]], breaks = seq(0, 360, 30))
+writeRaster(onset_anomaly_all, here("data", "processed", "raster",
+                                         "season_onset_anomaly.tif"),
+            overwrite = TRUE)
+
+
 
 ```
 
