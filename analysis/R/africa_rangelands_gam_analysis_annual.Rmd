@@ -212,17 +212,47 @@ df <- as.data.frame(var_stack_all, xy = TRUE, cells = TRUE) %>%
   pivot_wider(names_from = "var", values_from = "value") %>%
   filter(!is.na(gpp)) %>%
   group_by(cell) %>%
-  filter(n() < 19 * 0.8) %>%
+  filter(n() >= (19 * 0.8)) %>%
   ungroup() %>%
   rename("fire" = "modisBurn")
 
 head(df)
 
-df_with_map <- df %>%
+```
+
+Generate data frames ready for analysis:
+- Calculate mean, inter-annual and anomaly layers
+- Save annual and multi-annual data frames for analysis
+
+``` {r model_dfs}
+
+mean_vars <- c("gpp", "pptTotal", "pptIntensity", "pptGt95Pc",
+                   "pptGt10", "pptGt30", "pptUgi", "tMean",
+                   "sand", "clay", "soilN", "soilP", "fire",
+                   "x", "y")
+
+df_multi_annual <- df %>%
   group_by(cell) %>%
-  mutate(pptMean = mean(pptTotal, na.rm = T),
-         pptAnomalyAbs = pptMean - pptTotal) %>%
+  summarise(pptCV = sd(pptTotal) / mean(pptTotal),
+            pptMeanDaySD = sd(pptMeanDay),
+            across(all_of(vars_for_mean), mean)) %>%
+  ungroup() %>%
+  rename(pptMean = pptTotal)
+
+df_annual <- df %>%
+  group_by(cell) %>%
+  mutate(pptMean = mean(pptTotal),
+         pptAnomaly = pptTotal - pptMean,
+         pptAnomalyFrac = pptTotal / pptMean,
+         pptMeanDayAnomaly = pptMeanDay - mean(pptMeanDay)) %>%
   ungroup()
+
+# Write data frames to disk
+
+write_csv(df_multi_annual, here("data", "processed", "csv", "df_multi_annual.csv"))
+write_csv(df_annual, here("data", "processed", "csv", "df_annual.csv"))
+
+
 
 ```
 
@@ -560,7 +590,7 @@ analysis above.
 ```{r gam_prep, eval = FALSE}
 
 # Select model variables and scale some to more consistent units (0-1)
-df_model <- df_with_map %>%
+df_model <- df_annual %>%
   dplyr::select(cell, x, y, year, gpp, pptTotal, pptMean, pptAnomaly, pptIntensity,
                 pptGt95Pc, pptMeanDayAnomaly, pptUgi, seasonLength,
                 seasonOnsetAnomaly, soilN, sand, tMean, fire) %>%
@@ -614,7 +644,7 @@ toc()
 stopCluster(cl)
 
 # # Save/load model results
-write_rds(mod1, here("data", "processed", "models", "mod1_annual.rds"))
+write_rds(mod1, here("data", "processed", "models", "mod1_annual_abs.rds"))
 
 
 ```
@@ -648,7 +678,7 @@ cl <- makeCluster(nc)
 # Model with mean precipitation and annual anomaly
 tic()
 mod2 <- bam(gpp ~ s(pptMean, k = 16, bs = "ts") +
-              s(pptAnomaly, k = 16, bs = "ts") +
+              s(pptAnomaly, k = 12, bs = "ts") +
               # ti(pptMean, pptAnomaly, k = c(12,12), bs = "ts") +
               s(pptMeanDayAnomaly, k = 12, bs = "ts") +
               # ti(pptAnomaly, pptMeanDayAnomaly, k = 12, bs = "ts") +
@@ -674,7 +704,7 @@ toc()
 
 # # Save/load model results
 
-write_rds(mod2, here("data", "processed", "models", "mod2_annual.rds"))
+write_rds(mod2, here("data", "processed", "models", "mod2_annual_abs.rds"))
 
 ```
 
