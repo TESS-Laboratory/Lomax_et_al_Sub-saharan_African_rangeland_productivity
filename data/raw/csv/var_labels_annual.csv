@@ -1,0 +1,13 @@
+vars,label,parse,min_0,midpoint
+pptMean,MAP ~ (mm ~ yr^-1),1,1,-1
+pptAnomaly,Precipitation anomaly,0,1,1
+tMean,Mean air temperature (°C),0,0,-1
+pptIntensity,Intensity (mm ~ d^-1),1,1,-1
+pptGt95Pc,F['95w'],1,1,-1
+pptUgi,Unranked Gini index,0,1,-1
+seasonLength,Season length (d),0,1,-1
+seasonOnsetAnomaly,Season onset anomaly (d),0,0,0
+pptMeanDayAnomaly,Mean rainfall day anomaly (d),0,0,0
+fire,Fire ~ frequency ~ (yr^-1),1,1,-1
+soilN,Soil ~ nitrogen ~ (g ~ kg^-1),1,1,-1
+sand,Soil sand fraction,0,0,-1

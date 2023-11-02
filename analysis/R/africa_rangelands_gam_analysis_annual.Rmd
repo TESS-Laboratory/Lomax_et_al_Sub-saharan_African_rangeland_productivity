@@ -54,7 +54,7 @@ ggplot2::theme_set(theme_bw())
 tmap_options(check.and.fix = TRUE)
 
 # Establish number of cores for parallel computing
-nc <- 8
+nc <- (detectCores() / 4)
 
 ```
 
@@ -72,186 +72,10 @@ countries <- st_read(here("data", "raw", "vector", "natural_earth",
 africa <- filter(countries, CONTINENT == "Africa")
 africa_vct <- vect(africa)
 
-# CHIRPS annual precipitation variables
-precipitation_vars <- rast(here("data", "raw", "raster", "annual_variables",
-                                "pptVarsAnnual.tif"))
+# Load multi-annual data frame for modelling
 
-# CHIRPS annual season start and end dates 
-season_length <- rast(here("data", "processed", "raster", "season_length_annual.tif"))
-season_onset_anomaly <- rast(here("data", "processed", "raster", "season_onset_anomaly.tif"))
-
-names(season_length) <- paste0("seasonLength_", 2001:2019)
-names(season_onset_anomaly) <- paste0("seasonOnsetAnomaly_", 2001:2019)
-
-# Annual mean air temperature and fire occurrence
-non_precipitation_vars <- rast(here("data", "raw", "raster", "annual_variables",
-                                    "nonPptVarsAnnual.tif"))
-
-# PML_V2 annual total GPP  
-# Convert GPP to raw units (scale by 0.01)
-gpp <- (rast(here("data", "raw", "raster", "annual_variables",
-                 "gppAnnual.tif")) * 0.01) %>%
-  crop(precipitation_vars)  # Fixing error in extent from export
-
-# iSDAsoil data (top 20cm)
-soil <- rast(here("data", "raw", "raster", "main_variables", "soil.tif")) %>%
-  crop(precipitation_vars)  # Fixing error in extent from export
-names(soil) <- c("sand", "clay", "soilN", "soilP")
-
-# Mask layers
-# Aridity index
-ai <- rast(here("data", "raw", "raster", "study_area_masks",
-                "aridity.tif"))
-
-# MODIS land cover classification IGBP
-igbp <- rast(here("data", "raw", "raster", "study_area_masks",
-                  "igbpLandCover.tif"))
-
-# ESA WorldCover 10m land cover masks (2020)
-# Additional higher-resolution layers excluding urban, cropland and forested land
-esa_other <- rast(here("data", "raw", "raster", "study_area_masks",
-                  "esaLcFrac.tif"))
-esa_tree <- rast(here("data", "raw", "raster", "study_area_masks",
-                  "esaTreeFrac.tif"))
-
-# Zero mask (remove pixels where more than 25% of sub-pixels are zero for all
-# years in the dataset)
-zero_mask <- rast(here("data", "raw", "raster", "study_area_masks",
-                       "gppZeroMask.tif"))
-
-# CHIRPS seasonality ratio (for figures)
-# sr > 1 indicates multiple rainy seasons per year
-sr <- rast(here("data", "raw", "raster", "season_variables", "seasonalityRatio.tif"))
-
-```
-
-
-Clip and mask data layers:
-
-```{r mask, include = FALSE}
-
-igbp_index <- tibble(lc = c(6, 7, 8, 9, 10),
-                     cover = factor(c("Closed shrublands",
-                                      "Open shrublands",
-                                      "Woody savannas",
-                                      "Open savannas",
-                                      "Grasslands")))
-
-# Mask IGBP layers to African continental boundaries
-igbp_mask <- mask(igbp, africa_vct)
-
-# Most common assigned IGBP class
-
-# getMode <- function(x) {
-# keys <- na.omit(unique(x))
-# keys[which.max(tabulate(match(x, keys)))]
-# }
-# 
-# igbp_mode <- app(igbp_mask, getMode)
-# 
-# # Write and read modal IGBP class layer (slow to calculate)
-# writeRaster(igbp_mode, here("data", "processed", "raster",
-#                             "igbp_mode.tif"),
-#             overwrite = TRUE)
-
-igbp_mode <- rast(here("data", "processed", "raster",
-                       "igbp_mode.tif"))
-
-# Aridity index mask (include areas with 0.05 < ai > 0.65)
-ai_mask <- (ai > 500 & ai < 6500)
-
-# ESA masks (exclude > 25% non-rangeland or > 50% tree cover)
-esa_mask <- (esa_other < 0.25) & (esa_tree < 0.5)
-
-# Combine masks
-study_area_mask <- igbp_mode & ai_mask & esa_mask & zero_mask
-
-# Annual season length mask (mask season length <= 0 or NA)
-season_mask <- season_length > 0
-
-# Study area mask function
-sa_mask <- function(spatRaster, annual = FALSE) {
-  masked <- spatRaster %>%
-    mask(study_area_mask, maskvalues = c(0, NA))
-  
-  if(annual) {
-    masked <- mask(masked, season_mask, maskvalues = c(0, NA))
-  }
-  
-  masked
-}
-
-# Create stack of covariate rasters and mask to study region
-
-names(igbp_mode) <- "lc"
-names(esa_tree) <- "tree_frac"
-
-static_var_stack <- c(igbp_mode, esa_tree, soil)
-
-static_var_stack_masked <- sa_mask(static_var_stack)
-
-annual_var_stack <- c(gpp, precipitation_vars, season_length,
-                      season_onset_anomaly, non_precipitation_vars)
-
-annual_var_stack_masked <- sa_mask(annual_var_stack, annual = TRUE)
-
-var_stack_all <- c(static_var_stack_masked, annual_var_stack_masked)
-
-```
-
-Convert whole raster to data frame and reshape to tidy format
-
-```{r to_df, include = FALSE}
-
-df <- as.data.frame(var_stack_all, xy = TRUE, cells = TRUE) %>%
-  left_join(igbp_index) %>%
-  pivot_longer(cols = starts_with(c("gpp", "ppt", "tMean", "modisBurn", "season")),
-               names_to = "var_name", values_to = "value") %>%
-  separate_wider_delim(cols = "var_name", delim = "_", names = c("var", "year")) %>%
-  mutate(year = as.numeric(year)) %>%
-  pivot_wider(names_from = "var", values_from = "value") %>%
-  filter(!is.na(gpp)) %>%
-  group_by(cell) %>%
-  filter(n() >= (19 * 0.8)) %>%
-  ungroup() %>%
-  rename("fire" = "modisBurn")
-
-head(df)
-
-```
-
-Generate data frames ready for analysis:
-- Calculate mean, inter-annual and anomaly layers
-- Save annual and multi-annual data frames for analysis
-
-``` {r model_dfs}
-
-mean_vars <- c("gpp", "pptTotal", "pptIntensity", "pptGt95Pc",
-                   "pptGt10", "pptGt30", "pptUgi", "tMean",
-                   "sand", "clay", "soilN", "soilP", "fire",
-                   "x", "y")
-
-df_multi_annual <- df %>%
-  group_by(cell) %>%
-  summarise(pptCV = sd(pptTotal) / mean(pptTotal),
-            pptMeanDaySD = sd(pptMeanDay),
-            across(all_of(vars_for_mean), mean)) %>%
-  ungroup() %>%
-  rename(pptMean = pptTotal)
-
-df_annual <- df %>%
-  group_by(cell) %>%
-  mutate(pptMean = mean(pptTotal),
-         pptAnomaly = pptTotal - pptMean,
-         pptAnomalyFrac = pptTotal / pptMean,
-         pptMeanDayAnomaly = pptMeanDay - mean(pptMeanDay)) %>%
-  ungroup()
-
-# Write data frames to disk
-
-write_csv(df_multi_annual, here("data", "processed", "csv", "df_multi_annual.csv"))
-write_csv(df_annual, here("data", "processed", "csv", "df_annual.csv"))
-
+df <- read_csv(here("data", "processed", "csv", "df_annual.csv")) %>%
+  select(cell, x, y, gpp, starts_with("ppt"), starts_with("season"), everything())
 
 
 ```
@@ -587,19 +411,23 @@ covariates, as well as a smooth function of time s(year)
 To prepare for GAM modelling, we select only covariates retained from correlation
 analysis above.
 
-```{r gam_prep, eval = FALSE}
+```{r gam_prep}
 
-# Select model variables and scale some to more consistent units (0-1)
-df_model <- df_annual %>%
-  dplyr::select(cell, x, y, year, gpp, pptTotal, pptMean, pptAnomaly, pptIntensity,
-                pptGt95Pc, pptMeanDayAnomaly, pptUgi, seasonLength,
-                seasonOnsetAnomaly, soilN, sand, tMean, fire) %>%
-  mutate(gpp = gpp * 0.001,
-         sand = sand * 0.01,
-         pptMean = pptMean * 0.001,
-         pptTotal = pptTotal * 0.001)
+# Select variables equivalent to multi-annual analysis
 
-# Write intermediate CSV for modelling
+target_vars <- c(
+  "gpp",
+  "pptTotal", "pptMean", "pptAnomaly",
+  "pptIntensity", "pptGt95Pc", "pptUgi",
+  "pptMeanDayAnomaly", "seasonLength", "seasonOnsetAnomaly",
+  "tMean", "fire", "sand", "soilN"
+)
+
+df_model <- df %>%
+  select(cell, x, y, year, all_of(target_vars)) %>%
+  mutate(pptTotal = 0.001 * pptTotal,
+         pptMean = 0.001 * pptMean) %>%
+  filter(!is.na(seasonOnsetAnomaly))
 
 write_csv(df_model,
           here("data", "processed", "csv", "df_model_annual.csv"))
@@ -607,133 +435,217 @@ write_csv(df_model,
 ```
 
 
-Non-spatial model including all covariates
+Simple model dividing precipitation into mean annual precipitation and annual
+precipitation anomaly. We include the same spatial terms as in the multi-annual
+model, and also include a simple smooth term of year in order to capture any
+general time-related trends and potential temporal autocorrelation. In this
+model, we don't include any interaction terms between covariates or between the
+spatial and temporal parts of the model
 
-```{r raw_precipitation_model}
+```{r standard_models}
 
 df_model <- read_csv(here("data", "processed", "csv", "df_model_annual.csv"))
+df_model_sample <- read_csv(here("data", "processed", "csv", "df_model_annual_sample.csv"))
 
 cl <- makeCluster(nc)
 
-# set.seed(123)
-# test_df <- sample_frac(df_model, 0.1)
+# Model with mean precipitation and annual anomaly
 
 tic()
-mod1 <- bam(gpp ~ s(pptTotal, k = 16, bs = "ts") +
-              s(pptMeanDayAnomaly, k = 12, bs = "ts") +
-              # ti(pptTotal, pptMeanDayAnomaly, k = c(12,12), bs = "ts") +
-              s(pptIntensity, k = 12, bs = "ts") +
-              s(pptGt95Pc, k = 12, bs = "ts") +
-              s(pptUgi, k = 12, bs = "ts") +
-              s(seasonLength, k = 12, bs = "ts") +
-              s(seasonOnsetAnomaly, k = 12) +
-              s(tMean, k = 12, bs = "ts") +
-              s(fire, k = 12, bs = "ts") +
-              s(sand, k = 12, bs = "ts") +
-              s(soilN, k = 12, bs = "ts") +
-              te(x, y, k = c(12, 12), bs = "ts") +
-              s(year, k = 12, bs = "ts"),
+mod1 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
+              s(pptAnomaly, k = 8, bs = "ts") +
+              s(pptMeanDayAnomaly, k = 8, bs = "ts") +
+              s(pptIntensity, k = 8, bs = "ts") +
+              s(pptGt95Pc, k = 8, bs = "ts") +
+              s(pptUgi, k = 8, bs = "ts") +
+              s(seasonLength, k = 8, bs = "ts") +
+              s(seasonOnsetAnomaly, k = 8, bs = "ts") +
+              s(tMean, k = 8, bs = "ts") +
+              s(fire, k = 8, bs = "ts") +
+              s(sand, k = 8, bs = "ts") +
+              s(soilN, k = 8, bs = "ts") +
+              s(year, k = 8, bs = "ts"),
             data = df_model,
             method = "REML",
             family = Gamma(link = "log"),
             select = TRUE,
-            samfrac = 0.05,
+            samfrac = 0.1,
             cluster = cl)
 toc()
+
+write_rds(mod1, here("data", "processed", "models", "mod1_annual_sample.rds"))
+
+tic()
+mod2_k8 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
+              s(pptAnomaly, k = 8, bs = "ts") +
+              s(pptMeanDayAnomaly, k = 8, bs = "ts") +
+              s(pptIntensity, k = 8, bs = "ts") +
+              s(pptGt95Pc, k = 8, bs = "ts") +
+              s(pptUgi, k = 8, bs = "ts") +
+              s(seasonLength, k = 8, bs = "ts") +
+              s(seasonOnsetAnomaly, k = 8, bs = "ts") +
+              s(tMean, k = 8, bs = "ts") +
+              s(fire, k = 8, bs = "ts") +
+              s(sand, k = 8, bs = "ts") +
+              s(soilN, k = 8, bs = "ts") +
+              te(x, y, k = c(8, 8), bs = "ts") +
+              s(year, k = 8, bs = "ts"),
+            data = df_model,
+            method = "REML",
+            family = Gamma(link = "log"),
+            select = TRUE,
+            samfrac = 0.1,
+            cluster = cl)
+toc()
+
+write_rds(mod2_k8, here("data", "processed", "models", "mod2_k8_annual_sample.rds"))
+
+tic()
+mod2_k12 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
+              s(pptAnomaly, k = 8, bs = "ts") +
+              s(pptMeanDayAnomaly, k = 8, bs = "ts") +
+              s(pptIntensity, k = 8, bs = "ts") +
+              s(pptGt95Pc, k = 8, bs = "ts") +
+              s(pptUgi, k = 8, bs = "ts") +
+              s(seasonLength, k = 8, bs = "ts") +
+              s(seasonOnsetAnomaly, k = 8, bs = "ts") +
+              s(tMean, k = 8, bs = "ts") +
+              s(fire, k = 8, bs = "ts") +
+              s(sand, k = 8, bs = "ts") +
+              s(soilN, k = 8, bs = "ts") +
+              te(x, y, k = c(12, 12), bs = "ts") +
+              s(year, k = 8, bs = "ts"),
+            data = df_model,
+            method = "REML",
+            family = Gamma(link = "log"),
+            select = TRUE,
+            samfrac = 0.1,
+            cluster = cl)
+toc()
+
+write_rds(mod2_k12, here("data", "processed", "models", "mod2_k12_annual_sample.rds"))
+
+tic()
+mod2_k16 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts", fx=TRUE) +
+              s(pptAnomaly, k = 8, bs = "ts", fx=TRUE) +
+              s(pptMeanDayAnomaly, k = 8, bs = "ts", fx=TRUE) +
+              s(pptIntensity, k = 8, bs = "ts", fx=TRUE) +
+              s(pptGt95Pc, k = 8, bs = "ts", fx=TRUE) +
+              s(pptUgi, k = 8, bs = "ts", fx=TRUE) +
+              s(seasonLength, k = 8, bs = "ts", fx=TRUE) +
+              s(seasonOnsetAnomaly, k = 8, bs = "ts", fx=TRUE) +
+              s(tMean, k = 8, bs = "ts", fx=TRUE) +
+              s(fire, k = 8, bs = "ts", fx=TRUE) +
+              s(sand, k = 8, bs = "ts", fx=TRUE) +
+              s(soilN, k = 8, bs = "ts", fx=TRUE) +
+              te(x, y, k = c(16, 16), bs = "ts", fx=TRUE) +
+              s(year, k = 8, bs = "ts", fx=TRUE),
+            data = df_model,
+            method = "REML",
+            family = Gamma(link = "log"),
+            select = TRUE,
+            samfrac = 0.1,
+            cluster = cl
+)
+toc()
+
+saveRDS(mod2_k16, here("data", "processed", "models", "mod2_k16_annual_sample.rds"))
 
 stopCluster(cl)
 
-# # Save/load model results
-write_rds(mod1, here("data", "processed", "models", "mod1_annual_abs.rds"))
+```
 
+```{r standard_models_viz}
+
+mod1 <- read_rds(here("data", "processed", "models", "mod1_annual_sample.rds"))
+mod2_k8 <- read_rds(here("data", "processed", "models", "mod2_k8_annual_sample.rds"))
+mod2_k12 <- read_rds(here("data", "processed", "models", "mod2_k12_annual_sample.rds"))
+mod2_k16 <- read_rds(here("data", "processed", "models", "mod2_k16_annual_sample.rds"))
 
 ```
 
 
-``` {r raw_precipitation_model_viz}
-
-mod1 <- read_rds(here("data", "processed", "models", "mod1_annual.rds"))
-
-# Model 1 results
-summary(mod1)
-plot(mod1, shade = TRUE, seWithMean = TRUE, scheme = 2,
-     shift = coef(mod1)[1], pages = 2)
-gam.check(mod1)
-
-# concurvity(mod1)
-# (concurvity(mod1, full = FALSE)$estimate)
-
-```
-
-Second model splitting precipitation into mean annual precipitation and
-annual precipitation anomaly:
-
-```{r precipitation_anomaly_model}
+``` {r interaction_mods}
 
 cl <- makeCluster(nc)
 
-# set.seed(123)
-# test_df <- sample_frac(df_model, 0.1)
-
-# Model with mean precipitation and annual anomaly
 tic()
-mod2 <- bam(gpp ~ s(pptMean, k = 16, bs = "ts") +
-              s(pptAnomaly, k = 12, bs = "ts") +
+mod3 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
+              s(pptAnomaly, k = 8, bs = "ts") +
               # ti(pptMean, pptAnomaly, k = c(12,12), bs = "ts") +
-              s(pptMeanDayAnomaly, k = 12, bs = "ts") +
-              # ti(pptAnomaly, pptMeanDayAnomaly, k = 12, bs = "ts") +
-              s(pptIntensity, k = 12, bs = "ts") +
-              s(pptGt95Pc, k = 12, bs = "ts") +
-              s(pptUgi, k = 12, bs = "ts") +
-              s(seasonLength, k = 12, bs = "ts") +
-              s(seasonOnsetAnomaly, k = 12) +
-              s(tMean, k = 12, bs = "ts") +
-              s(fire, k = 12, bs = "ts") +
-              s(sand, k = 12, bs = "ts") +
-              s(soilN, k = 12, bs = "ts") +
-              te(x, y, k = c(12, 12), bs = "ts") +
-              s(year, k = 12, bs = "ts"),
+              s(pptMeanDayAnomaly, k = 8, bs = "ts") +
+              # ti(pptAnomaly, pptMeanDayAnomaly, k = c(12,12), bs = "ts") +
+              s(pptIntensity, k = 8, bs = "ts") +
+              s(pptGt95Pc, k = 8, bs = "ts") +
+              s(pptUgi, k = 8, bs = "ts") +
+              s(seasonLength, k = 8, bs = "ts") +
+              s(seasonOnsetAnomaly, k = 8) +
+              s(tMean, k = 8, bs = "ts") +
+              s(fire, k = 8, bs = "ts") +
+              s(sand, k = 8, bs = "ts") +
+              s(soilN, k = 8, bs = "ts") +
+              ti(x, y, k = c(12, 12), bs = "ts") +
+              ti(year, k = 8, bs = "ts") +
+              ti(x, y, year, d = c(2,1), bs = c("ts", "ts"), k = c(6,6)),
             data = df_model,
             method = "REML",
             family = Gamma(link = "log"),
             select = TRUE,
-            samfrac = 0.05,
+            samfrac = 0.1,
             cluster = cl)
 toc()
 
+# # Save/load model results
+
+write_rds(mod3, here("data", "processed", "models", "mod3_annual.rds"))
+
+
+# With more interactions
+
+tic()
+mod3_int <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
+              s(pptAnomaly, k = 8, bs = "ts") +
+              ti(pptMean, pptAnomaly, k = c(6,6), bs = "ts") +
+              s(pptMeanDayAnomaly, k = 8, bs = "ts") +
+              ti(pptAnomaly, pptMeanDayAnomaly, k = c(6,6), bs = "ts") +
+              s(pptIntensity, k = 8, bs = "ts") +
+              s(pptGt95Pc, k = 8, bs = "ts") +
+              s(pptUgi, k = 8, bs = "ts") +
+              s(seasonLength, k = 8, bs = "ts") +
+              s(seasonOnsetAnomaly, k = 8) +
+              s(tMean, k = 8, bs = "ts") +
+              s(fire, k = 8, bs = "ts") +
+              s(sand, k = 8, bs = "ts") +
+              s(soilN, k = 8, bs = "ts") +
+              ti(x, y, k = c(12, 12), bs = "ts") +
+              ti(year, k = 8, bs = "ts") +
+              ti(x, y, year, d = c(2,1), bs = c("ts", "ts"), k = c(6,6)),
+            data = df_model,
+            method = "REML",
+            family = Gamma(link = "log"),
+            select = TRUE,
+            samfrac = 0.1,
+            cluster = cl)
+toc()
 
 # # Save/load model results
 
-write_rds(mod2, here("data", "processed", "models", "mod2_annual_abs.rds"))
-
-```
-
-
-``` {precipitation_anomaly_model_viz}
-
-mod2 <- read_rds(here("data", "processed", "models", "mod2_annual.rds"))
-
-# Model 2 results
-summary(mod2)
-plot(mod2, shade = TRUE, seWithMean = TRUE, scheme = 2,
-     pages = 3)
-
-gam.check(mod2, pages = 1)
+write_rds(mod3_int, here("data", "processed", "models", "mod3_annual_int.rds"))
 
 
 ```
-
-The spatial models have an improved fit, with 94-96% deviance explained and a
-relatively symmetrical distribution of residuals (with some outliers).
 
 
 # Plot GAM results
 
 ```{r term_plots}
 
+df_model <- read_csv(here("data", "processed", "csv", "df_model_annual.csv"))
+study_area_mask <- rast(here("data", "processed", "raster", "study_area_mask.tif"))
+
 # Set plot output directory
 
-plot_dir <- "figures/"
+plot_dir <- here("results", "figures")
 
 theme_set(theme_classic())
 
@@ -742,12 +654,24 @@ theme_set(theme_classic())
 # Extract smooth shapes as data frame using gratia
 
 mod1_smooths <- gratia::smooth_estimates(mod1, unconditional = TRUE) %>%
-  mutate(Model = "Raw precipitation",
+  mutate(Model = "Non-spatial",
          ci_low= est - se * 1.96,
          ci_high = est + se * 1.96,
-         precipitation = precipitation * 1000)
-mod2_smooths <- gratia::smooth_estimates(mod2, unconditional = TRUE) %>%
-  mutate(Model = "Mean precipitaton and anomaly",
+         pptMean = pptMean * 1000)
+mod2_k8_smooths <- gratia::smooth_estimates(mod2_k8, unconditional = TRUE) %>%
+  mutate(Model = "Spatial - low\ncomplexity",
+         ci_low= est - se * 1.96,
+         ci_high = est + se * 1.96,
+         pptMean = pptMean * 1000) %>%
+  select(-c(x,y))
+mod2_k12_smooths <- gratia::smooth_estimates(mod2_k12, unconditional = TRUE) %>%
+  mutate(Model = "Spatial - medium\ncomplexity",
+         ci_low= est - se * 1.96,
+         ci_high = est + se * 1.96,
+         pptMean = pptMean * 1000) %>%
+  select(-c(x,y))
+mod2_k16_smooths <- gratia::smooth_estimates(mod2_k16, unconditional = TRUE) %>%
+  mutate(Model = "Spatial - high\ncomplexity",
          ci_low= est - se * 1.96,
          ci_high = est + se * 1.96,
          pptMean = pptMean * 1000) %>%
@@ -756,11 +680,13 @@ mod2_smooths <- gratia::smooth_estimates(mod2, unconditional = TRUE) %>%
 
 # Combine models into single data frame
 mod_smooths <- bind_rows(mod1_smooths,
-                         mod2_smooths)
+                         mod2_k8_smooths,
+                         mod2_k12_smooths,
+                         mod2_k16_smooths)
 
 # Read in data labels lookup table
 
-var_labels <- read_csv("csv/var_labels.csv")
+var_labels <- read_csv(here("data", "raw", "csv", "var_labels_annual.csv"))
 
 var_list <- var_labels$vars
 
@@ -791,14 +717,15 @@ plots <- map(var_list, function(var) {
     select(smooth, type, est, se, ci_low, ci_high, Model,
              all_of(var)) %>%
     mutate(Model = factor(Model, levels = c("Non-spatial",
-                                            "Spatial - low smoothing",
-                                            "Spatial - medium smoothing",
-                                            "Spatial - high smoothing")),
+                                            "Spatial - low\ncomplexity",
+                                            "Spatial - medium\ncomplexity",
+                                            "Spatial - high\ncomplexity")),
            Model = ordered(Model)) %>%
     rename(var0 = 8) %>%
     drop_na()
   
   plot <- ggplot(smooth_df, aes(x = var0, y = est)) +
+    geom_hline(yintercept = 0, colour = "grey80") +
     geom_ribbon(aes(ymin = ci_low, ymax = ci_high,
                     fill = Model), alpha = 0.7) +
     geom_line(aes(colour = Model, linetype = Model), alpha = 0.8, lwd = 0.6) +
@@ -810,6 +737,15 @@ plots <- map(var_list, function(var) {
     labs(x = x_label,
          y = "Partial effect")
   
+  if(var_labels$min_0[var_labels$vars == var] == 1) {
+    plot <- plot + scale_x_continuous(limits = c(0, max(smooth_df$var_0)))
+  }
+  
+  if(var_labels$midpoint[var_labels$vars == var] != -1) {
+    midpoint <- var_labels$midpoint[var_labels$vars == var]
+    plot <- plot + geom_vline(xintercept = midpoint, colour = "grey80")
+  }
+  
   # Arrange into small multiples with patchwork package 
   density + plot +
     plot_layout(ncol = 1, nrow = 2, widths = 4, heights = c(1, 4))
@@ -819,57 +755,77 @@ plots <- map(var_list, function(var) {
 gam_plot <- ggarrange(plotlist = plots, ncol = 3, nrow = 4, common.legend = TRUE)
 
 # Save spatial term map
-ggsave(paste0(plot_dir, "main_gam_plot.jpg"),
+ggsave(here(plot_dir, "annual_gam_plot.jpg"),
        plot = gam_plot,
        width = 20, height = 30, units = "cm", dpi = 300)
 
-# Create map of spatial term for low smoothing spatial model
-
-mod2_spatial_smooth <- gratia::smooth_estimates(
-  mod2_k16,
-  n = 300,
-  smooth = "te(x,y)",
-  dist = 0.01) %>%
-  mutate(ci_low= est - se * 1.96,
-         ci_high = est + se * 1.96)
-
-spatial_rast <- mod2_spatial_smooth %>%
-  select(x, y, est) %>%
-  as.data.frame() %>%
-  rast(crs = "epsg:4326") %>%
-  mask(africa_vct) %>%
-  crop(var_stack_masked)
-
-spatial_plot_mask <- study_area_mask %>%
-  crop(spatial_rast)
-
-africa_basemap <- tm_shape(africa) + tm_borders() +
-  tm_layout(legend.position = c("left", "bottom"), legend.text.size = 0.8,
-            legend.title.size = 1,
-            legend.bg.color = "white", legend.bg.alpha = 0,
-            legend.height = -0.4) +
-  tm_graticules(n.x = 6, n.y = 6, col = "grey", labels.size = 0.6)
-
-# Create additional mask raster to overlay on excluded regions
-outside_sa <- mask(study_area_mask, study_area_mask, maskvalues = c(1, NA))
-
-sa_basemap_2 <- tm_shape(outside_sa) +
-  tm_raster(col = "values", palette = "grey75", legend.show = FALSE)
-
-rast_plot <- tm_shape(spatial_rast) +
-  tm_raster(palette = "RdYlBu", breaks = c(-2, -1, 0, 1, 2), style = "cont",
-            title = "Partial effect\nof spatial term") +
-  sa_basemap_2 +
-  africa_basemap
-
-# Save spatial term map
-tmap_save(rast_plot,
-          paste0(plot_dir, "spatial_term.jpg"),
-          width = 16, height = 12, units = "cm", dpi = 300)
+# # Create map of spatial term for low smoothing spatial model
+# 
+# mod2_spatial_smooth <- gratia::smooth_estimates(
+#   mod2_k16,
+#   n = 300,
+#   smooth = "te(x,y)",
+#   dist = 0.01) %>%
+#   mutate(ci_low= est - se * 1.96,
+#          ci_high = est + se * 1.96)
+# 
+# spatial_rast <- mod2_spatial_smooth %>%
+#   select(x, y, est) %>%
+#   as.data.frame() %>%
+#   rast(crs = "epsg:4326") %>%
+#   mask(africa_vct) %>%
+#   crop(var_stack_masked)
+# 
+# spatial_plot_mask <- study_area_mask %>%
+#   crop(spatial_rast)
+# 
+# africa_basemap <- tm_shape(africa) + tm_borders() +
+#   tm_layout(legend.position = c("left", "bottom"), legend.text.size = 0.8,
+#             legend.title.size = 1,
+#             legend.bg.color = "white", legend.bg.alpha = 0,
+#             legend.height = -0.4) +
+#   tm_graticules(n.x = 6, n.y = 6, col = "grey", labels.size = 0.6)
+# 
+# # Create additional mask raster to overlay on excluded regions
+# outside_sa <- mask(study_area_mask, study_area_mask, maskvalues = c(1, NA))
+# 
+# sa_basemap_2 <- tm_shape(outside_sa) +
+#   tm_raster(col = "values", palette = "grey75", legend.show = FALSE)
+# 
+# rast_plot <- tm_shape(spatial_rast) +
+#   tm_raster(palette = "RdYlBu", breaks = c(-2, -1, 0, 1, 2), style = "cont",
+#             title = "Partial effect\nof spatial term") +
+#   sa_basemap_2 +
+#   africa_basemap
+# 
+# # Save spatial term map
+# tmap_save(rast_plot,
+#           paste0(plot_dir, "spatial_term_annual.jpg"),
+#           width = 16, height = 12, units = "cm", dpi = 300)
 
 
 ```
 
+
+The results are very similar to the multi-annual, except for two aspects:
+1. The annual precipitation anomaly is clearly important, although it seems
+linear (on a log scale), which suggests a concave-up relationship overall.
+2. The ranges of the covariates tend to be larger (because they are annual
+values rather than means), such that the bulk of the data tends to be squeezed
+into a very small range of the x-axis. This presumably means it's harder to
+judge/detect any effect of these covariates. Do I need to centre and transform
+variables to make them meaningful for the GAM?
+
+The very similar results suggest that the model is still being driven by spatial
+gradients in covariates rather than differences over time. Perhaps I need to
+separately build a model that looks only at anomalies in GPP (fractional or
+absolute) as a function of other anomalies? I could focus on the variables that
+seemed to have substantive effects in the mean analysis for starters. The
+challenge of GAMs is that it's very difficult to compare the magnitude of the
+effect between the spatial model and the temporal model, since the functions
+are composite polynomials and since the model involves a log link that
+means a unit increase in a covariate doesn't have a simple interpretation in
+terms of the response.
 
 Model diagnostic and residual plots
 
@@ -907,3 +863,87 @@ ggsave(paste0(plot_dir, "mod2_annual_diag_plot.jpg"),
 
 ```
 
+
+
+Repeat model for separate MAP bins:
+
+```{r binned_models}
+
+# library(future)
+# library(furrr)
+
+df_model <- read_csv(here("data", "processed", "csv", "df_model_annual.csv"))
+
+df_model_bins <- df_model %>%
+  mutate(map_bin = cut_width(pptMean, width = 0.4, boundary = 0)) %>%
+  group_by(map_bin) %>%
+  nest() %>%
+  ungroup()
+
+# Cut to only first three bins
+df_model_bins <- df_model_bins[1:3,]
+
+fit_gam <- function(data, spatial = FALSE, spatial_k = 12) {
+  
+  if (spatial) {
+    model <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
+                   s(pptAnomaly, k = 8, bs = "ts") +
+                   s(pptMeanDayAnomaly, k = 8, bs = "ts") +
+                   s(pptIntensity, k = 8, bs = "ts") +
+                   s(pptGt95Pc, k = 8, bs = "ts") +
+                   s(pptUgi, k = 8, bs = "ts") +
+                   s(seasonLength, k = 8, bs = "ts") +
+                   s(seasonOnsetAnomaly, k = 8, bs = "ts") +
+                   s(tMean, k = 8, bs = "ts") +
+                   s(fire, k = 8, bs = "ts") +
+                   s(sand, k = 8, bs = "ts") +
+                   s(soilN, k = 8, bs = "ts") +
+                   te(x, y, k = c(spatial_k, spatial_k), bs = "ts") +
+                   s(year, k = 8, bs = "ts"),
+                 data = data,
+                 method = "REML",
+                 family = Gamma(link = "log"),
+                 select = TRUE,
+                 samfrac = 0.1,
+                 cluster = cl)
+  } else {
+    model <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
+                   s(pptAnomaly, k = 8, bs = "ts") +
+                   s(pptMeanDayAnomaly, k = 8, bs = "ts") +
+                   s(pptIntensity, k = 8, bs = "ts") +
+                   s(pptGt95Pc, k = 8, bs = "ts") +
+                   s(pptUgi, k = 8, bs = "ts") +
+                   s(seasonLength, k = 8, bs = "ts") +
+                   s(seasonOnsetAnomaly, k = 8, bs = "ts") +
+                   s(tMean, k = 8, bs = "ts") +
+                   s(fire, k = 8, bs = "ts") +
+                   s(sand, k = 8, bs = "ts") +
+                   s(soilN, k = 8, bs = "ts") +
+                   s(year, k = 8, bs = "ts"),
+                 data = data,
+                 method = "REML",
+                 family = Gamma(link = "log"),
+                 select = TRUE,
+                 samfrac = 0.1,
+                 cluster = cl)
+  }
+  
+  model
+}
+
+cl <- makeCluster(nc)
+# plan("multisession", workers = nc)
+
+tic()
+models_binned <- df_model_bins %>%
+  mutate(mod1 = map(data, fit_gam, spatial = FALSE),
+         mod2_k8 = map(data, fit_gam, spatial = TRUE, spatial_k = 8),
+         mod2_k12 = map(data, fit_gam, spatial = TRUE, spatial_k = 12),
+         mod2_k16 = map(data, fit_gam, spatial = TRUE, spatial_k = 16))
+toc()
+stopCluster(cl)
+
+write_rds(models_binned, here("results", "rds", "binned_models_annual.rds"))
+
+
+```

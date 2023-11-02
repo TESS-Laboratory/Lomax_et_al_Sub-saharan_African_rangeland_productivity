@@ -1,13 +1,13 @@
-vars,label,parse
-map,MAP ~ (mm ~ yr^-1),1
-tMean,Mean air temperature (°C),0
-cv,Interannual CV,0
-season,Season length (d),0
-onset_sd,SD of season onset (d),0
-mean_day_sd,SD of mean rainfall day (d),0
-ugi,Unranked Gini index,0
-intensity,Intensity (mm ~ d^-1),1
-wet95,F['95w'],1
-soilN,Soil ~ nitrogen ~ (g ~ kg^-1),1
-sand,Soil sand fraction,0
-fire,Fire ~ frequency ~ (yr^-1),1
+vars,label,parse,min_0
+pptMean,MAP ~ (mm ~ yr^-1),1,1
+pptCV,Interannual CV,0,1
+tMean,Mean air temperature (°C),0,0
+pptIntensity,Intensity (mm ~ d^-1),1,1
+pptGt95Pc,F['95w'],1,1
+pptUgi,Unranked Gini index,0,0
+seasonLength,Season length (d),0,0
+seasonOnsetSD,Season onset SD (d),0,0
+pptMeanDaySD,Mean rainfall day SD (d),0,0
+fire,Fire ~ frequency ~ (yr^-1),1,1
+soilN,Soil ~ nitrogen ~ (g ~ kg^-1),1,1
+sand,Soil sand fraction,0,0

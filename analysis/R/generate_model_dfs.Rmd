@@ -1,0 +1,235 @@
+---
+title: Disentangling the environmental drivers of gross primary productivity in African rangelands - data preparation
+author: "Guy Lomax"
+date: '2023-10-27'
+output: html_notebook
+---
+
+
+```{r setup, include=FALSE}
+
+# If running for first time, run renv::restore() to install required packages
+# renv::restore()
+
+# Data management
+
+library(tidyverse)
+library(terra)
+library(sf)
+library(here)
+
+terraOptions(tempdir = here("data", "temp", "terra"),
+             memfrac = 0.8)
+
+```
+
+
+# Load and pre-process data
+
+Raster data layers prepared, cropped and aggregated to 0.05 deg resolution
+using Google Earth Engine.
+
+
+```{r load_data, results = "hide", include = FALSE}
+
+# Africa country boundaries (Natural Earth dataset)
+countries <- st_read(here("data", "raw", "vector", "natural_earth",
+                          "ne_110m_admin_0_countries_fixed.shp"))
+africa <- filter(countries, CONTINENT == "Africa")
+africa_vct <- vect(africa)
+
+# CHIRPS annual precipitation variables
+precipitation_vars <- rast(here("data", "raw", "raster", "annual_variables",
+                                "pptVarsAnnual.tif"))
+
+# CHIRPS annual season start and end dates 
+season_length <- rast(here("data", "processed", "raster", "season_length_annual.tif"))
+season_onset_anomaly <- rast(here("data", "processed", "raster", "season_onset_anomaly.tif"))
+
+names(season_length) <- paste0("seasonLength_", 2001:2019)
+names(season_onset_anomaly) <- paste0("seasonOnsetAnomaly_", 2001:2019)
+
+# Annual mean air temperature and fire occurrence
+non_precipitation_vars <- rast(here("data", "raw", "raster", "annual_variables",
+                                    "nonPptVarsAnnual.tif"))
+
+# PML_V2 annual total GPP  
+# Convert GPP to raw units (scale by 0.01)
+gpp <- (rast(here("data", "raw", "raster", "annual_variables",
+                 "gppAnnual.tif")) * 0.01) %>%
+  crop(precipitation_vars)  # Fixing error in extent from export
+
+# iSDAsoil data (top 20cm)
+soil <- rast(here("data", "raw", "raster", "main_variables", "soil.tif")) %>%
+  crop(precipitation_vars)  # Fixing error in extent from export
+names(soil) <- c("sand", "clay", "soilN", "soilP")
+
+# Mask layers
+# Aridity index
+ai <- rast(here("data", "raw", "raster", "study_area_masks",
+                "aridity.tif"))
+
+# MODIS land cover classification IGBP
+igbp <- rast(here("data", "raw", "raster", "study_area_masks",
+                  "igbpLandCover.tif"))
+
+# ESA WorldCover 10m land cover masks (2020)
+# Additional higher-resolution layers excluding urban, cropland and forested land
+esa_other <- rast(here("data", "raw", "raster", "study_area_masks",
+                  "esaLcFrac.tif"))
+esa_tree <- rast(here("data", "raw", "raster", "study_area_masks",
+                  "esaTreeFrac.tif"))
+
+# Zero mask (remove pixels where more than 25% of sub-pixels are zero for all
+# years in the dataset)
+zero_mask <- rast(here("data", "raw", "raster", "study_area_masks",
+                       "gppZeroMask.tif"))
+
+# CHIRPS seasonality ratio (for figures)
+# sr > 1 indicates multiple rainy seasons per year
+sr <- rast(here("data", "raw", "raster", "season_variables", "seasonalityRatio.tif"))
+
+```
+
+
+Clip and mask data layers:
+
+```{r mask, include = FALSE}
+
+igbp_index <- tibble(lc = c(6, 7, 8, 9, 10),
+                     cover = factor(c("Closed shrublands",
+                                      "Open shrublands",
+                                      "Woody savannas",
+                                      "Open savannas",
+                                      "Grasslands")))
+
+# Mask IGBP layers to African continental boundaries
+igbp_mask <- mask(igbp, africa_vct)
+
+# Most common assigned IGBP class
+
+# getMode <- function(x) {
+# keys <- na.omit(unique(x))
+# keys[which.max(tabulate(match(x, keys)))]
+# }
+# 
+# igbp_mode <- app(igbp_mask, getMode)
+# 
+# # Write and read modal IGBP class layer (slow to calculate)
+# writeRaster(igbp_mode, here("data", "processed", "raster",
+#                             "igbp_mode.tif"),
+#             overwrite = TRUE)
+
+igbp_mode <- rast(here("data", "processed", "raster",
+                       "igbp_mode.tif"))
+
+# Aridity index mask (include areas with 0.05 < ai > 0.65)
+ai_mask <- (ai > 500 & ai < 6500)
+
+# ESA masks (exclude > 25% non-rangeland or > 50% tree cover)
+esa_mask <- (esa_other < 0.25) & (esa_tree < 0.5)
+
+# Combine masks
+study_area_mask <- igbp_mode & ai_mask & esa_mask & zero_mask
+
+# Annual season length mask (mask season length <= 0 or NA)
+season_mask <- season_length > 0
+
+# Study area mask function
+sa_mask <- function(spatRaster, annual = FALSE) {
+  masked <- spatRaster %>%
+    mask(study_area_mask, maskvalues = c(0, NA))
+  
+  if(annual) {
+    masked <- mask(masked, season_mask, maskvalues = c(0, NA))
+  }
+  
+  masked
+}
+
+# Create stack of covariate rasters and mask to study region
+
+names(igbp_mode) <- "lc"
+names(esa_tree) <- "tree_frac"
+
+static_var_stack <- c(igbp_mode, esa_tree, soil)
+
+static_var_stack_masked <- sa_mask(static_var_stack)
+
+annual_var_stack <- c(gpp, precipitation_vars, season_length,
+                      season_onset_anomaly, non_precipitation_vars)
+
+annual_var_stack_masked <- sa_mask(annual_var_stack, annual = TRUE)
+
+var_stack_all <- c(static_var_stack_masked, annual_var_stack_masked)
+
+# Save study area mask as raster for map generation
+writeRaster(study_area_mask, here("data", "processed", "raster", "study_area_mask.tif"))
+
+```
+
+Convert whole raster to data frame and reshape to tidy format
+
+```{r to_df, include = FALSE}
+
+df <- as.data.frame(var_stack_all, xy = TRUE, cells = TRUE) %>%
+  left_join(igbp_index) %>%
+  pivot_longer(cols = starts_with(c("gpp", "ppt", "tMean", "modisBurn", "season")),
+               names_to = "var_name", values_to = "value") %>%
+  separate_wider_delim(cols = "var_name", delim = "_", names = c("var", "year")) %>%
+  mutate(year = as.numeric(year)) %>%
+  pivot_wider(names_from = "var", values_from = "value") %>%
+  filter(!is.na(gpp)) %>%
+  group_by(cell) %>%
+  filter(n() >= (19 * 0.8)) %>%
+  ungroup() %>%
+  rename("fire" = "modisBurn")
+
+
+```
+
+Generate data frames ready for analysis:
+- Calculate mean, inter-annual and anomaly layers
+- Save annual and multi-annual data frames for analysis
+
+``` {r model_dfs}
+
+mean_vars <- c("x", "y",
+               "gpp",
+               "pptTotal", "pptDryDays", "pptIntensity", "pptGt95Pc", 
+               "pptGt10", "pptGt30", "pptUgi", "seasonLength",
+               "tMean", "fire", "sand", "clay", "soilN", "soilP")
+
+sd_vars <- c("pptCV", "pptMeanDaySD", "seasonOnsetSD")
+
+annual_vars <- c("x", "y", "year",
+                 "gpp",
+                 "pptTotal", "pptMean", "pptAnomaly",
+                 "pptDryDays", "pptIntensity", "pptGt95Pc", "pptGt10", "pptGt30",
+                 "pptUgi", "pptMeanDayAnomaly", "seasonLength", "seasonOnsetAnomaly",
+                 "tMean", "fire", "sand", "clay", "soilN", "soilP")
+
+df_multi_annual <- df %>%
+  group_by(cell) %>%
+  summarise(pptCV = sd(pptTotal) / mean(pptTotal),
+            pptMeanDaySD = sd(pptMeanDay),
+            seasonOnsetSD = sd(seasonOnsetAnomaly),
+            across(all_of(mean_vars), mean)) %>%
+  ungroup() %>%
+  select(cell, all_of(mean_vars), all_of(sd_vars)) %>%
+  rename(pptMean = pptTotal)
+
+df_annual <- df %>%
+  group_by(cell) %>%
+  mutate(pptMean = mean(pptTotal),
+         pptAnomaly = pptTotal / pptMean,
+         pptMeanDayAnomaly = pptMeanDay - mean(pptMeanDay)) %>%
+  ungroup() %>%
+  select(cell, all_of(annual_vars))
+
+# Write data frames to disk
+
+write_csv(df_multi_annual, here("data", "processed", "csv", "df_multi_annual.csv"))
+write_csv(df_annual, here("data", "processed", "csv", "df_annual.csv"))
+
+```
