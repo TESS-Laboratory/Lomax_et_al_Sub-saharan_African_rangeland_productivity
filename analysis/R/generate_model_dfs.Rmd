@@ -163,6 +163,8 @@ annual_var_stack_masked <- sa_mask(annual_var_stack, annual = TRUE)
 
 var_stack_all <- c(static_var_stack_masked, annual_var_stack_masked)
 
+writeRaster(var_stack_all, here("data", "processed", "raster", "var_raster_stack.tif"))
+
 # Save study area mask as raster for map generation
 writeRaster(study_area_mask, here("data", "processed", "raster", "study_area_mask.tif"))
 
@@ -195,6 +197,7 @@ Generate data frames ready for analysis:
 ``` {r model_dfs}
 
 mean_vars <- c("x", "y",
+               "lc",
                "gpp",
                "pptTotal", "pptDryDays", "pptIntensity", "pptGt95Pc", 
                "pptGt10", "pptGt30", "pptUgi", "seasonLength",
