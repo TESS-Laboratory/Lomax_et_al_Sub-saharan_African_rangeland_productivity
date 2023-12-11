@@ -38,6 +38,7 @@ library(tictoc)
 library(beepr)
 
 # Visualisation
+library(tmap)
 library(gratia)
 library(ggpubr)
 library(patchwork)
@@ -46,8 +47,6 @@ library(patchwork)
 plot_dir <- here("results", "figures")
 
 ggplot2::theme_set(theme_bw())
-
-tmap_options(check.and.fix = TRUE)
 
 # Establish number of cores for parallel computing
 nc <- (detectCores() / 4)
@@ -97,7 +96,6 @@ Variable definitions:
 |ugi|Unranked Gini index of daily precipitation|unitless 0-1|CHIRPS|
 |-------------|----------|----|
 |season|Average rainy season length|days|CHIRPS|
-|season_sd|Standard deviation of rainy season length|days|CHIRPS|
 |onset_sd|Standard deviation of rainy season onset|days|CHIRPS|
 |-------------|----------|----|
 |sand|Soil sand fraction 0-20cm|%|iSDAsoil|
@@ -116,7 +114,7 @@ ppt_var_names <- c("pptTotal", "pptAnomaly", "pptMeanDayAnomaly", "pptIntensity"
                "pptGt95Pc", "pptUgi", "seasonLength", "seasonOnsetAnomaly", "pptMean")
 non_ppt_var_names <- c("tMean", "fire", "sand", "clay", "soilN", "soilP")
 
-cor_matrix <- df_with_map %>%
+cor_matrix <- df %>%
   dplyr::select(gpp, all_of(ppt_var_names), all_of(non_ppt_var_names)) %>%
   cor(method = "spearman", use="pairwise.complete.obs")
 
@@ -195,8 +193,8 @@ sample_cells <- sample(unique_cells, length(unique_cells) * 0.1)
 
 df_model_sample <- filter(df_model, cell %in% sample_cells)
 
-# write_csv(df_model,
-#           here("data", "processed", "csv", "df_model_annual.csv"))
+write_csv(df_model,
+          here("data", "processed", "csv", "df_model_annual.csv"))
 write_csv(df_model_sample,
           here("data", "processed", "csv", "df_model_annual_sample.csv"))
 
@@ -331,12 +329,32 @@ mod2_k8 <- read_rds(here("data", "processed", "models", "mod2_k8_annual_sample.r
 mod2_k12 <- read_rds(here("data", "processed", "models", "mod2_k12_annual_sample.rds"))
 mod2_k16 <- read_rds(here("data", "processed", "models", "mod2_k16_annual_sample.rds"))
 
+
+mod1_diag <- appraise(mod1, ci_alpha = 0.5, point_alpha = 0.05, n_bins = 50)
+mod2_k8_diag <- appraise(mod2_k8, ci_alpha = 0.5, point_alpha = 0.05, n_bins = 50)
+mod2_k12_diag <- appraise(mod2_k12, ci_alpha = 0.5, point_alpha = 0.05, n_bins = 50)
+mod2_k16_diag <- appraise(mod2_k16, ci_alpha = 0.5, point_alpha = 0.05, n_bins = 50)
+
+mod1_diag
+mod2_k8_diag 
+mod2_k12_diag
+mod2_k16_diag
+
+ggsave(here("results", "figures", "mod1_diag_annual.png"), mod1_diag,
+       width = 26.5, height = 22, units = "cm", dpi = 200)
+ggsave(here("results", "figures", "mod2_k8_diag_annual.png"), mod2_k8_diag,
+       width = 26.5, height = 22, units = "cm", dpi = 200)
+ggsave(here("results", "figures", "mod2_k12_diag_annual.png"), mod2_k16_diag,
+       width = 26.5, height = 22, units = "cm", dpi = 200)
+ggsave(here("results", "figures", "mod2_k16_diag_annual.png"), mod2_k16_diag,
+       width = 26.5, height = 22, units = "cm", dpi = 200)
+
 ```
 
 
 ```{r temporal_autocorrelation_check}
 
-mod_residuals <- df_model %>%
+mod_residuals <- df_model_sample %>%
   mutate(mod1_resids = residuals(mod1, type = "response"),
          mod2_k8_resids = residuals(mod2_k8, type = "response"),
          mod2_k12_resids = residuals(mod2_k12, type = "response"),
@@ -346,13 +364,26 @@ mod_ac <- mod_residuals %>%
   select(cell, x, y, year, gpp, pptMean, ends_with("resids")) %>%
   group_by(cell) %>%
   arrange(year, .by_group = TRUE) %>%
-  summarise(x = mean(x),
-            y = mean(y),
-            gpp = mean(gpp),
-            pptMean = mean(pptMean),
-            across(ends_with("resids"),
-                   function(res) {acf(res, plot = F, lag.max = 2)$acf[2]})) %>%
-  ungroup()
+  reframe(x = mean(x),
+          y = mean(y),
+          gpp = mean(gpp),
+          pptMean = mean(pptMean),
+          lag = 0:5,
+          across(ends_with("resids"),
+                 function(res) {acf(res, plot = F, lag.max = 5)$acf}))
+
+# Histogram and map of autocorrelation
+histograms <- list(length = 5)
+
+for (i in 1:5) {
+  hist <- mod_ac %>%
+    filter(lag == i) %>%
+    ggplot(aes(x = mod2_k12_resids)) +
+    geom_histogram(bins = 100, fill = "lightgreen", colour = "grey") +
+    geom_vline(xintercept = 0, colour = "red")
+  
+  histograms[[i]] <- hist
+}
 
 mod_ac_rast <- mod_ac %>%
   select(x, y, mod2_k12_resids) %>%
@@ -362,20 +393,6 @@ tm_shape(mod_ac_rast) + tm_raster(style = "cont", palette = "RdBu") +
   tm_shape(africa) + tm_borders()
 
 tm_shape(mod_ac_rast > 0.45) + tm_raster()
-
-# Now try the one with interactions
-
-mod3 <- read_rds(here("data", "processed", "models", "mod3_annual.rds"))
-
-mod3_residuals <- df_model %>%
-  mutate(mod3_resids = residuals(mod3, type = "response"))
-
-mod3_ac <- mod3_residuals %>%
-  group_by(cell) %>%
-  summarise(x = mean(x),
-            y = mean(y),
-            ac = acf(mod3_resids, plot = F, lag.max = 2)$acf[2]) %>%
-  ungroup()
 
 ```
 
@@ -449,7 +466,6 @@ toc()
 # # Save/load model results
 
 write_rds(mod3_int, here("data", "processed", "models", "mod3_annual_int.rds"))
-
 
 ```
 
@@ -548,27 +564,29 @@ plots <- map(var_list, function(var) {
     rename(var0 = 8) %>%
     drop_na()
   
-  # # Calculate bins
-  # diff <- smooth_df$var0[2] - smooth_df$var0[1]
-  # 
-  # df_bins <- data_df %>%
-  #   mutate(bin = cut_interval(z, length = diff)) %>%
-  #   count(bin, .drop = FALSE)
-  # 
-  # alpha_list <- pmin(1, df_bins$n / (nrow(df_model) / 1000)) %>%
-  #   rep(4)
-  # alpha_list <- alpha_list[1:400]
+  # Calculate bins
+  diff <- smooth_df$var0[2] - smooth_df$var0[1]
+
+  df_bins <- data_df %>%
+    mutate(bin = cut_interval(z, length = diff)) %>%
+    count(bin, .drop = FALSE)
+
+  alpha_list <- pmin(1, (df_bins$n / (nrow(df_model) / 100))) %>%
+    rep(4)
+  smooth_df$alpha <- alpha_list[1:400]
+  
   
   plot <- ggplot(smooth_df, aes(x = var0, y = est,
-                                # alpha = alpha_list
+                                alpha = alpha
                                 )) +
     geom_hline(yintercept = 1, colour = "grey80", linetype = "longdash") +
-    geom_ribbon(aes(ymin = ci_low, ymax = ci_high,
-                    fill = Model)) +
+    # geom_ribbon(aes(ymin = ci_low, ymax = ci_high,
+    # fill = Model)) +
     geom_line(aes(colour = Model), lwd = 0.6) +
-    scale_colour_manual(values = c("#CCCCCC", "#bae4b3", "#31a354","#006d2c")) +
+    scale_colour_manual(values = c("#888888", "#41ab5d", "#238443","#004529")) +
     scale_linetype_manual(values = c("longdash", "solid", "solid", "solid")) +
-    scale_fill_manual(values = c("#DDDDDD", "#daffd3", "#51c384","#208d4c")) +
+    scale_alpha_continuous(range = c(0.3, 1)) +
+    # scale_fill_manual(values = c("#DDDDDD", "#daffd3", "#51c384","#208d4c")) +
     guides(alpha = "none") +
     ylim(0, 2.5) +
     labs(x = x_label,
@@ -592,7 +610,7 @@ plots <- map(var_list, function(var) {
 gam_plot <- ggarrange(plotlist = plots, ncol = 3, nrow = 4, common.legend = TRUE)
 
 # Save spatial term map
-ggsave(here(plot_dir, "annual_gam_plot_exp.jpg"),
+ggsave(here(plot_dir, "annual_gam_plot_exp_alpha.jpg"),
        plot = gam_plot,
        width = 20, height = 30, units = "cm", dpi = 300)
 
@@ -771,19 +789,19 @@ fit_gam <- function(data, spatial = FALSE, spatial_k = 12) {
 cl <- makeCluster(nc)
 # plan("multisession", workers = nc)
 
-tic()
-mod1_binned <- df_model_bins %>%
-  mutate(mod1 = map(data, fit_gam, spatial = FALSE)) %>%
-  select(-data)
-toc()
-write_rds(mod1_binned, here("data", "processed", "models", "mod1_binned_annual.rds"))
-
-tic()
-mod2_k8_binned <- df_model_bins %>%
-  mutate(mod2_k8 = map(data, fit_gam, spatial = TRUE, spatial_k = 8)) %>%
-  select(-data)
-toc()
-write_rds(mod2_k8_binned, here("data", "processed", "models", "mod2_k8_binned_annual.rds"))
+# tic()
+# mod1_binned <- df_model_bins %>%
+#   mutate(mod1 = map(data, fit_gam, spatial = FALSE)) %>%
+#   select(-data)
+# toc()
+# write_rds(mod1_binned, here("data", "processed", "models", "mod1_binned_annual.rds"))
+# 
+# tic()
+# mod2_k8_binned <- df_model_bins %>%
+#   mutate(mod2_k8 = map(data, fit_gam, spatial = TRUE, spatial_k = 8)) %>%
+#   select(-data)
+# toc()
+# write_rds(mod2_k8_binned, here("data", "processed", "models", "mod2_k8_binned_annual.rds"))
 
 tic()
 mod2_k12_binned <- df_model_bins %>%
