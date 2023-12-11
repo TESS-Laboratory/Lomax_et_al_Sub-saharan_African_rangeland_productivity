@@ -50,8 +50,6 @@ plot_dir <- here("results", "figures")
 
 ggplot2::theme_set(theme_bw())
 
-tmap_options(check.and.fix = TRUE)
-
 # Establish number of cores for parallel computing
 nc <- (detectCores() / 4)
 
@@ -119,12 +117,12 @@ Calculate correlation matrix for all variables in dataset:
 ```{r correlation, eval = FALSE}
 
 cor_matrix = df %>%
-  dplyr::select(-cell, -x, -y) %>%
+  dplyr::select(-cell, -x, -y, -lc) %>%
   cor(method = "spearman", use="pairwise.complete.obs")
 
 var_names <- c("GPP", "MAP", "dry", "intensity", ":F['95w']", ":D['10mm']",
-               ":D['30mm']", "UGi", "CV", ":sigma[meanDay]", "season", ":sigma[onset]",
-               "MAT", "fire","sand", "clay", "soilN", "soilP")
+               ":D['30mm']", "UGi", "CV", "Mean Day SD", "Season length", "Onset SD",
+               "tMean", "fire", "sand", "clay", "soilN", "soilP")
 colnames(cor_matrix) <- var_names
 rownames(cor_matrix) <- var_names
 
@@ -147,10 +145,10 @@ other covariates, leaving the following:
 - CV
 - UGi
 - season
-- sigma_onset
+- season onset SD
 - mean_day_sd
-- SDII
-- F_95w
+- intensity
+- F95w
 - soilN
 - sand
 - tMean
@@ -192,14 +190,15 @@ df_model <- df %>%
 
 ```
 
-Non-spatial model including all covariates
+Fit models including target covariates:
 
-```{r non_spatial_model_fit, eval = FALSE}
+```{r model_fit, eval = FALSE}
 
 df_model <- read_csv(here("data", "processed", "csv", "df_model_multi_annual.csv"))
 
 cl <- makeCluster(nc)
 
+# Non-spatial model
 tic()
 mod1 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
               s(pptCV, k = 8, bs = "ts") +
@@ -221,48 +220,10 @@ mod1 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
             cluster = cl)
 toc()
 
-stopCluster(cl)
-
 # Save model results
 write_rds(mod1, here("data", "processed", "models", "mod1.rds"))
 
-
-```
-
-```{r non_spatial_model_vis}
-
-mod1 <- read_rds(here("data", "processed", "models", "mod1.rds"))
-
-# Model 1 results
-summary(mod1)
-plot(mod1, shade = TRUE, seWithMean = TRUE, scheme = 2,
-     shift = coef(mod1)[1], pages = 2)
-gam.check(mod1)
-
-# concurvity(mod1)
-# (concurvity(mod1, full = FALSE)$estimate)
-
-```
-
-
-This model greatly improves the overall fit. A remarkable 84% of deviance is
-explained by the model, and the structure of the residuals is slightly improved.
-All variables included have a significant effect, with the possible exception of
-F95w (extreme rainfall).
-
-Pairwise concurvity remains low, suggesting the variables are sufficiently
-independent.
-
-Now I add the spatial term to account for the spatial structure in the model
-residuals.
-
-```{r spatial_model_fit, eval = FALSE}
-
-df_model <- read_csv(here("data", "processed", "csv", "df_model_multi_annual.csv"))
-
-cl <- makeCluster(nc)
-
-# Spatial model - high smoothing (k = c(8,8) for spatial term)
+# Spatial model - low complexity (k = c(8,8) for spatial term)
 tic()
 mod2_k8 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
               s(pptCV, k = 8, bs = "ts") +
@@ -287,7 +248,7 @@ toc()
 
 write_rds(mod2_k8, here("data", "processed", "models", "mod2_k8.rds"))
 
-# Spatial model - medium smoothing (k = c(12,12) for spatial term)
+# Spatial model - medium complexity (k = c(12,12) for spatial term)
 tic()
 mod2_k12 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
               s(pptCV, k = 8, bs = "ts") +
@@ -312,7 +273,7 @@ toc()
 
 write_rds(mod2_k12, here("data", "processed", "models", "mod2_k12.rds"))
 
-# Spatial model - low smoothing (k = c(16,16) for spatial term)
+# Spatial model - high complexity (k = c(16,16) for spatial term)
 
 tic()
 mod2_k16 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
@@ -338,20 +299,25 @@ toc()
 
 write_rds(mod2_k16, here("data", "processed", "models", "mod2_k16.rds"))
 
+stopCluster(cl)
+
 
 ```
 
 
-```{r spatial_model_vis}
+
+```{r model_load_check}
 
 # Load model results
-
+mod1 <- read_rds(here("data", "processed", "models", "mod1.rds"))
 mod2_k8 <- read_rds(here("data", "processed", "models", "mod2_k8.rds"))
 mod2_k12 <- read_rds(here("data", "processed", "models", "mod2_k12.rds"))
 mod2_k16 <- read_rds(here("data", "processed", "models", "mod2_k16.rds"))
 
 # Model 2 results
 
+plot(mod1, shade = TRUE, seWithMean = TRUE, scheme = 2,
+     pages = 3)
 plot(mod2_k8, shade = TRUE, seWithMean = TRUE, scheme = 2,
      pages = 3)
 plot(mod2_k12, shade = TRUE, seWithMean = TRUE, scheme = 2,
@@ -359,23 +325,19 @@ plot(mod2_k12, shade = TRUE, seWithMean = TRUE, scheme = 2,
 plot(mod2_k16, shade = TRUE, seWithMean = TRUE, scheme = 2,
      pages = 3)
 
-print("Spatial term k = 8")
-gam.check(mod2_k8)
-print("Spatial term k = 12")
-gam.check(mod2_k12)
-print("Spatial term k = 16")
-gam.check(mod2_k16)
+# print("Spatial term k = 8")
+# gam.check(mod2_k8)
+# print("Spatial term k = 12")
+# gam.check(mod2_k12)
+# print("Spatial term k = 16")
+# gam.check(mod2_k16)
 
 ```
 
 
-The spatial models have an improved fit, with 94-96% deviance explained and a
-relatively symmetrical distribution of residuals (with some outliers).
-
-
 # Plot GAM results
 
-``` {r term_plots}
+``` {r term_plots, eval = FALSE}
 
 df_model <- read_csv(here("data", "processed", "csv", "df_model_multi_annual.csv"))
 study_area_mask <- rast(here("data", "processed", "raster", "study_area_mask.tif"))
@@ -470,14 +432,29 @@ plots <- map(var_list, function(var) {
     rename(var0 = 8) %>%
     drop_na()
   
-  plot <- ggplot(smooth_df, aes(x = var0, y = est)) +
-    geom_hline(yintercept = 1, colour = "grey80") +
-    geom_ribbon(aes(ymin = ci_low, ymax = ci_high,
-                    fill = Model), alpha = 0.7) +
-    geom_line(aes(colour = Model, linetype = Model), alpha = 0.8, lwd = 0.6) +
-    scale_colour_manual(values = c("#AAAAAA", "#bae4b3", "#31a354","#006d2c")) +
+  # Calculate bins
+  diff <- smooth_df$var0[2] - smooth_df$var0[1]
+
+  df_bins <- data_df %>%
+    mutate(bin = cut_interval(z, length = diff)) %>%
+    count(bin, .drop = FALSE)
+
+  alpha_list <- pmin(1, (df_bins$n / (nrow(df_model) / 100))) %>%
+    rep(4)
+  smooth_df$alpha <- alpha_list[1:400]
+  
+  
+  plot <- ggplot(smooth_df, aes(x = var0, y = est,
+                                alpha = alpha
+                                )) +
+    geom_hline(yintercept = 1, colour = "grey80", linetype = "longdash") +
+    # geom_ribbon(aes(ymin = ci_low, ymax = ci_high,
+    # fill = Model)) +
+    geom_line(aes(colour = Model), lwd = 0.6) +
+    scale_colour_manual(values = c("#888888", "#41ab5d", "#238443","#004529")) +
     scale_linetype_manual(values = c("longdash", "solid", "solid", "solid")) +
-    scale_fill_manual(values = c("#DDDDDD", "#daffd3", "#51c384","#208d4c")) +
+    scale_alpha_continuous(range = c(0.3, 1)) +
+    # scale_fill_manual(values = c("#DDDDDD", "#daffd3", "#51c384","#208d4c")) +
     guides(alpha = "none") +
     ylim(0, 2.5) +
     labs(x = x_label,
@@ -496,7 +473,7 @@ plots <- map(var_list, function(var) {
 gam_plot <- ggarrange(plotlist = plots, ncol = 3, nrow = 4, common.legend = TRUE)
 
 # Save main GAM figure
-ggsave(here(plot_dir, "main_gam_plot_exp.jpg"),
+ggsave(here(plot_dir, "main_gam_plot_exp_alpha.jpg"),
        plot = gam_plot,
        width = 20, height = 30, units = "cm", dpi = 300)
 
@@ -506,9 +483,12 @@ mod2_spatial_smooth <- gratia::smooth_estimates(
   mod2_k16,
   n = 300,
   smooth = "te(x,y)",
-  dist = 0.01) %>%
+  dist = 0.025) %>%
   mutate(ci_low= est - se * 1.96,
-         ci_high = est + se * 1.96)
+         ci_high = est + se * 1.96,
+         est = exp(est),
+         ci_low = exp(ci_low),
+         ci_high = exp(ci_high))
 
 spatial_rast <- mod2_spatial_smooth %>%
   select(x, y, est) %>%
@@ -525,7 +505,7 @@ africa_basemap <- tm_shape(africa) + tm_borders() +
             legend.title.size = 1,
             legend.bg.color = "white", legend.bg.alpha = 0,
             legend.height = -0.4) +
-  tm_graticules(n.x = 6, n.y = 6, col = "grey", labels.size = 0.6)
+  tm_graticules(x = c(-15,0,15,30,45), y = c(-30,-15,0,15,30), col = "grey90", alpha = 0.6, labels.size = 0.6)
 
 # Create additional mask raster to overlay on excluded regions
 outside_sa <- mask(study_area_mask, study_area_mask, maskvalues = c(1, NA))
@@ -534,8 +514,9 @@ sa_basemap_2 <- tm_shape(outside_sa) +
   tm_raster(palette = "grey75", legend.show = FALSE)
 
 rast_plot <- tm_shape(spatial_rast) +
-  tm_raster(palette = "RdYlBu", breaks = c(-2, -1, 0, 1, 2), style = "cont",
-            title = "Partial effect\nof spatial term") +
+  tm_raster(palette = "RdYlBu", breaks = c(0, 0.5, 1, 1.5, 2), style = "cont", midpoint = 1,
+            title = "Partial effect\nof spatial term",
+            legend.reverse = TRUE) +
   sa_basemap_2 +
   africa_basemap
 
@@ -548,31 +529,31 @@ tmap_save(rast_plot,
 ```
 
 
-Model diagnostic and residual plots
+Model diagnostic and residual plots:
 
 ```{r diag_plots}
 
 # Model diagnostic plots
 
-mod1_diag <- appraise(mod1, n_bins = 60, point_alpha = 0.05, line_col = "#888888")
-ggsave(here(plot_dir, "mod1_diag_plot.jpg"),
-       plot = mod1_diag,
-       width = 20, height = 16, units = "cm", dpi = 300)
+mod1_diag <- appraise(mod1, ci_alpha = 0.5, point_alpha = 0.05, n_bins = 50)
+mod2_k8_diag <- appraise(mod2_k8, ci_alpha = 0.5, point_alpha = 0.05, n_bins = 50)
+mod2_k12_diag <- appraise(mod2_k12, ci_alpha = 0.5, point_alpha = 0.05, n_bins = 50)
+mod2_k16_diag <- appraise(mod2_k16, ci_alpha = 0.5, point_alpha = 0.05, n_bins = 50)
 
-mod2_k8_diag <- appraise(mod2_k8, n_bins = 60, point_alpha = 0.05, line_col = "#117733")
-ggsave(here(plot_dir, "mod2_k8_diag_plot.jpg"),
-       plot = mod2_k8_diag,
-       width = 20, height = 16, units = "cm", dpi = 300)
+mod1_diag
+mod2_k8_diag 
+mod2_k12_diag
+mod2_k16_diag
 
-mod2_k12_diag <- appraise(mod2_k8, n_bins = 60, point_alpha = 0.05, line_col = "#117733")
-ggsave(here(plot_dir, "mod2_k12_diag_plot.jpg"),
-       plot = mod2_k12_diag,
-       width = 20, height = 16, units = "cm", dpi = 300)
+ggsave(here("results", "figures", "mod1_diag.png"), mod1_diag,
+       width = 26.5, height = 22, units = "cm", dpi = 200)
+ggsave(here("results", "figures", "mod2_k8_diag.png"), mod2_k8_diag,
+       width = 26.5, height = 22, units = "cm", dpi = 200)
+ggsave(here("results", "figures", "mod2_k12_diag.png"), mod2_k16_diag,
+       width = 26.5, height = 22, units = "cm", dpi = 200)
+ggsave(here("results", "figures", "mod2_k16_diag.png"), mod2_k16_diag,
+       width = 26.5, height = 22, units = "cm", dpi = 200)
 
-mod2_k16_diag <- appraise(mod2_k8, n_bins = 60, point_alpha = 0.05, line_col = "#117733")
-ggsave(here(plot_dir, "mod2_k16_diag_plot.jpg"),
-       plot = mod2_k16_diag,
-       width = 20, height = 16, units = "cm", dpi = 300)
 
 # Residual map
 resid_raster <- df_model %>%
@@ -582,22 +563,23 @@ resid_raster <- df_model %>%
 
 resid_plot <- tm_shape(resid_raster) + 
   tm_raster(palette = "RdYlBu", style = "cont",
-            breaks = c(-0.5, -0.25, 0, 0.25, 0.5),
-            title = "Model residuals") +
+            breaks = c(-1, -0.5, 0, 0.5, 1),
+            title = "Model residuals",
+            legend.reverse = TRUE) +
   sa_basemap_2 +
   africa_basemap
 
 tmap_save(resid_plot,
-          here(plot_dir, "mod2_resid_map.jpg"),
+          here(plot_dir, "mod2_k16_resid_map.jpg"),
           width = 16, height = 12, unit = "cm", dpi = 300)
 
 ```
 
-Repeat model for separate MAP bins:
-```{r binned_models}
 
-library(future)
-library(furrr)
+Repeat model for separate MAP bins:
+
+
+```{r binned_models}
 
 df_model <- read_csv(here("data", "processed", "csv", "df_model_multi_annual.csv"))
 
@@ -627,7 +609,8 @@ fit_gam <- function(data, spatial = FALSE, spatial_k = 12) {
                  method = "REML",
                  family = Gamma(link = "log"),
                  select = TRUE,
-                 samfrac = 0.1)
+                 samfrac = 0.1,
+                 cluster = cl)
   } else {
     model <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
                    s(pptCV, k = 8, bs = "ts") +
@@ -645,26 +628,51 @@ fit_gam <- function(data, spatial = FALSE, spatial_k = 12) {
                  method = "REML",
                  family = Gamma(link = "log"),
                  select = TRUE,
-                 samfrac = 0.1)
+                 samfrac = 0.1,
+                 cluster = cl)
   }
   
   model
 }
 
-# cl <- makeCluster(nc)
-plan("multisession", workers = nc)
+cl <- makeCluster(nc)
 
 tic()
-models_binned <- df_model_bins %>%
-  mutate(mod1 = future_map(data, fit_gam, spatial = FALSE),
-         mod2_k8 = future_map(data, fit_gam, spatial = TRUE, spatial_k = 8),
-         mod2_k12 = future_map(data, fit_gam, spatial = TRUE, spatial_k = 12),
-         mod2_k16 = future_map(data, fit_gam, spatial = TRUE, spatial_k = 16))
+
+mod1_binned <- df_model_bins %>%
+  mutate(mod1 = map(data, fit_gam, spatial = FALSE))
+write_rds(mod1_binned, here("data", "processed", "models", "mod1_binned.rds"))
+
+mod2_k8_binned <- df_model_bins %>%
+  mutate(mod2_k8 = map(data, fit_gam, spatial = TRUE, spatial_k = 8)) %>%
+  select(-data)
+write_rds(mod2_k8_binned, here("data", "processed", "models", "mod2_k8_binned.rds"))
+
+mod2_k12_binned <- df_model_bins %>%
+  mutate(mod2_k12 = map(data, fit_gam, spatial = TRUE, spatial_k = 12)) %>%
+  select(-data)
+write_rds(mod2_k12_binned, here("data", "processed", "models", "mod2_k12_binned.rds"))
+
+mod2_k16_binned <- df_model_bins %>%
+  mutate(mod2_k16 = map(data, fit_gam, spatial = TRUE, spatial_k = 16)) %>%
+  select(-data)
+write_rds(mod2_k16_binned, here("data", "processed", "models", "mod2_k16_binned.rds"))
+
 toc()
-# stopCluster(cl)
+stopCluster(cl)
 
-write_rds(models_binned, here("results", "rds", "binned_models.rds"))
+mod1_binned <- read_rds(here("data", "processed", "models", "mod1_binned.rds"))
+mod2_k8_binned <- read_rds(here("data", "processed", "models", "mod2_k8_binned.rds"))
+mod2_k12_binned <- read_rds(here("data", "processed", "models", "mod2_k12_binned.rds"))
+mod2_k16_binned <- read_rds(here("data", "processed", "models", "mod2_k16_binned.rds"))
 
+models_binned_all <- mod1_binned %>%
+  left_join(mod2_k8_binned) %>%
+  left_join(mod2_k12_binned) %>%
+  left_join(mod2_k16_binned) %>%
+  slice(1:3)
+
+write_rds(models_binned_all, here("data", "processed", "models", "models_binned_all.rds"))
 
 ```
 
@@ -673,16 +681,239 @@ Visualise binned models:
 
 ```{r binned_models_viz}
 
-models_binned <- read_rds(here("results", "rds", "binned_models.rds"))
+models_binned <- read_rds(here("data", "processed", "models", "models_binned_all.rds"))
+df_model <- read_csv(here("data", "processed", "csv", "df_model_multi_annual.csv"))
 
-# Drop final row (1600-2000 mm yr-1) - insufficient rows for model fitting
-models_binned_cut <- models_binned[1:3,]
+# Rename bins
 
-head(models_binned_cut)
+models_binned$map_bin <- c("'0-400'~mm~yr^-1",
+                           "'400-800'~mm~yr^-1",
+                           "'800-1,200'~mm~yr^-1")
+# Set plot output directory
 
-# plot_gam <- function(gam) {
-#   plot(gam, pages = 3, seWithMean = T, scheme = 2)
+plot_dir <- here("results", "figures")
+
+theme_set(theme_classic())
+
+## Binned GAM partial effect plots
+
+# Set min and max values for each variable to be consistent for different bins
+var_labels <- read_csv(here("data", "raw", "csv", "var_labels.csv")) %>%
+    mutate(min = map(vars, function(var) {min(df_model[[var]])}) %>% unlist(),
+           max = map(vars, function(var) {max(df_model[[var]])}) %>% unlist())
+target_vars <- factor(c("pptCV", "pptIntensity", "tMean", "soilN"))
+
+var_labels_target <- filter(var_labels, vars %in% target_vars) %>%
+  mutate(label = c("Interannual~CV", "'Mean air temperature (°C)'",
+                   "Intensity~(mm~d^-1)", "Soil~nitrogen~(g~kg^-1)"),
+         label = ordered(label, levels =
+                           c("Interannual~CV", "Intensity~(mm~d^-1)",
+                            "'Mean air temperature (°C)'", "Soil~nitrogen~(g~kg^-1)")))
+
+# Create tidy data frame of all binned model outcomes
+model_names <- tibble(model_id = colnames(models_binned)[3:6],
+                      model_name = c("Non-spatial",
+                                     "Spatial - low\ncomplexity",
+                                     "Spatial - medium\ncomplexity",
+                                     "Spatial - high\ncomplexity"
+                      )) %>%
+  mutate(model_name = ordered(model_name, levels = model_name)
+)
+                      
+models_binned_tidy <- models_binned %>%
+  pivot_longer(cols = starts_with("mod"), names_to = "model_id", values_to = "model_object") %>%
+  left_join(model_names)
+
+# Generate binned smooth df function
+generate_smooths <- function(model) {
+  gratia::smooth_estimates(model, unconditional = TRUE) %>%
+    mutate(ci_low= exp(est - se * 1.96),
+           ci_high = exp(est + se * 1.96),
+           est = exp(est),
+           pptMean = pptMean * 1000) %>%
+    filter(type == "TPRS (shrink)") %>%
+    select(-type, -by, -smooth)
+}
+
+models_binned_smooths <- models_binned_tidy %>%
+  mutate(smooth_estimates = map(model_object, generate_smooths)) %>%
+  select(-model_object, -data) %>%
+  unnest(smooth_estimates)
+
+# Filter and reorganise_smooths of target vars
+
+exclude_vars <- var_labels$vars[!(var_labels$vars %in% target_vars)]
+
+models_binned_smooths_tidy <- models_binned_smooths %>%
+  select(-all_of(exclude_vars), -x, -y) %>%
+  pivot_longer(all_of(target_vars), names_to = "var", values_to = "var_value") %>%
+  drop_na()
+
+# Add alpha values to plot
+
+var_diffs <- models_binned_smooths_tidy %>%
+  group_by(map_bin, var) %>%
+  arrange(var, .by_group = TRUE) %>%
+  summarise(diff = first(lead(var_value) - var_value))
+
+# Function to extract binned density values from data frame
+
+density_from_df <- function(df, diff) {
+  df_binned <- df %>%
+    mutate(bin = cut_interval(.[[1]], length = diff)) %>%
+    count(bin, .drop = FALSE)
+  
+  rows <- nrow(df)
+  
+  df_binned$alpha <- pmin(1, (df_binned$n / (rows / 100)))
+  
+  df_binned
+}
+
+df_bins_alpha <- models_binned %>%
+  select(map_bin, data) %>%
+  left_join(var_diffs) %>%
+  mutate(data = map2(data, var, select),
+         bin_alpha = map2(data, diff, density_from_df)) %>%
+  select(-data, -diff)
+
+models_binned_smooths_alpha <- models_binned_smooths_tidy %>%
+  group_by(map_bin, var, model_id, model_name) %>%
+  nest() %>%
+  left_join(df_bins_alpha) %>%
+  mutate(data = map2(data, bin_alpha, function(df, alpha_df) {
+    df$alpha <- alpha_df$alpha; df
+  })) %>%
+  select(-bin_alpha) %>%
+  unnest(data) %>%
+  ungroup()
+
+smooths_labelled <- models_binned_smooths_alpha %>%
+  left_join(var_labels_target, by = c("var" = "vars"))
+
+# One big plot?
+
+grid_plot <- ggplot(smooths_labelled, aes(x = var_value, y = est, colour = model_name, alpha = alpha)) +
+  geom_hline(yintercept = 1, colour = "grey80", linetype = "longdash") +
+  geom_line(lwd = 0.6) +
+  scale_colour_manual(values = c("#888888", "#41ab5d", "#238443","#004529")) +
+  scale_linetype_manual(values = c("longdash", "solid", "solid", "solid")) +
+  scale_alpha_continuous(range = c(0.2, 1)) +
+  guides(alpha = "none") +
+  ylim(0, 2.5) +
+  labs(x = "Covariate value",
+       y = "Partial effect",
+       colour = "Model") +
+  facet_grid(rows = vars(map_bin), cols = vars(label),
+             scales = "free_x",
+             labeller = label_parsed) +
+  theme_classic() +
+  theme(panel.background = element_rect(fill = NA, color = "black"),
+        legend.position = "top")
+
+ggsave(here("results", "figures", "binned_gam_plot_facets.png"),
+       grid_plot,
+       width = 20, height = 15, units = "cm", dpi = 300)
+
+
+head(smooths_labelled)
+
+# # Hmm, I think it's better with ggarrange
+# 
+# plot_configurations <- tibble(map_bin = rep(unique(models_binned_smooths_tidy$map_bin), each = length(target_vars)),
+#                         var = rep(target_vars, 3))
+# 
+# plot_list <- list(length = nrow(plot_configurations))
+# 
+# for (i in seq_len(nrow(plot_configurations))) {
+#   
+#   map_bin_i <- plot_configurations$map_bin[i]
+#   var_i <- plot_configurations$var[i]
+#   
+#   # Labels for each facet window
+#   # Create expressions for those with superscript/subscripts
+#   x_label <- var_labels$label[var_labels$vars == var_i]
+#   if (var_labels$parse[var_labels$vars == var_i]) {
+#     x_label <- parse(text = x_label)
+#   }
+#   
+#   # Set min and max x values
+#   min_x <- var_labels$min[var_labels$vars == var_i]
+#   max_x <- var_labels$max[var_labels$vars == var_i]
+#   
+#   # Plot data density plot
+#   data_df <- models_binned$data[models_binned$map_bin == map_bin_i][[1]] %>%
+#   select(x, y, all_of(var_i)) %>%
+#   rename(z = 3)
+#   
+#   density <- ggplot(data_df, aes(x = z)) +
+#     geom_density(colour = "grey70", fill = "grey90", alpha = 0.6) +
+#     xlim(min_x, max_x) +
+#     theme_void()
+#     
+#   # Plot model smooths
+#   smooth_df <- models_binned_smooths_tidy %>%
+#     filter(map_bin == map_bin_i & var == var_i) %>%
+#     select(map_bin, model_name, est, se, ci_low, ci_high, var, var_value) %>%
+#     mutate(model_name = factor(model_name, levels = c("Non-spatial",
+#                                             "Spatial - low\ncomplexity",
+#                                             "Spatial - medium\ncomplexity",
+#                                             "Spatial - high\ncomplexity")),
+#            model_name = ordered(model_name)) %>%
+#     drop_na()
+# 
+#   # Calculate bins
+#   diff <- smooth_df$var_value[2] - smooth_df$var_value[1]
+# 
+#   df_bins <- data_df %>%
+#     mutate(bin = cut_interval(z, length = diff)) %>%
+#     count(bin, .drop = FALSE)
+# 
+#   alpha_list <- pmin(1, (df_bins$n / (nrow(df_model) / 100))) %>%
+#     rep(4)
+#   smooth_df$alpha <- alpha_list[1:400]
+#   
+#   
+#   plot <- ggplot(smooth_df, aes(x = var_value, y = est,
+#                                 alpha = alpha
+#                                 )) +
+#     geom_hline(yintercept = 1, colour = "grey80", linetype = "longdash") +
+#     # geom_ribbon(aes(ymin = ci_low, ymax = ci_high,
+#     # fill = Model)) +
+#     geom_line(aes(colour = model_name), lwd = 0.6) +
+#     scale_colour_manual(values = c("#888888", "#41ab5d", "#238443","#004529")) +
+#     scale_linetype_manual(values = c("longdash", "solid", "solid", "solid")) +
+#     scale_alpha_continuous(range = c(0.3, 1)) +
+#     # scale_fill_manual(values = c("#DDDDDD", "#daffd3", "#51c384","#208d4c")) +
+#     guides(alpha = "none") +
+#     ylim(0, 2.5) +
+#     xlim(min_x, max_x) +
+#     labs(x = x_label,
+#          y = "Partial effect",
+#          colour = "Model")
+#     
+#     # Arrange into small multiples with patchwork package 
+#     output <- density + plot +
+#         plot_layout(ncol = 1, nrow = 2, widths = 4, heights = c(1, 4))
+#     
+#     plot_list[[i]] <- output
 # }
+# 
+# gam_plot_binned <- ggarrange(plotlist = plot_list,
+#                              ncol = length(target_vars), nrow = 3,
+#                              common.legend = TRUE)
+# 
+# ggsave(here(plot_dir, "binned_gam_plot_grid.png"),
+#         plot = gam_plot_binned,
+#         width = 30, height = 20, units = "cm", dpi = 300)
+
+
+```
+
+```{r binned_mod_viz_2}
+
+models_binned <- read_rds(here("data", "processed", "models", "models_binned_all.rds"))
+df_model <- read_csv(here("data", "processed", "csv", "df_model_multi_annual.csv"))
 
 # Set plot output directory
 
@@ -692,40 +923,36 @@ theme_set(theme_classic())
 
 ## Binned GAM partial effect plots
 
-for (i in 1:nrow(models_binned_cut)) {
+for (i in 1:nrow(models_binned)) {
   
   # Extract smooth shapes as data frame using gratia
   
-  mod1_smooths <- gratia::smooth_estimates(models_binned_cut$mod1[[i]], unconditional = TRUE) %>%
+  mod1_smooths <- gratia::smooth_estimates(models_binned$mod1[[i]], unconditional = TRUE) %>%
     mutate(Model = "Non-spatial",
            ci_low= exp(est - se * 1.96),
            ci_high = exp(est + se * 1.96),
            est = exp(est),
-           pptMean = pptMean * 1000,
-           pptCV = pptCV * 100)      # CHANGE THIS BACK WHEN I RERUN MODELS!
-  mod2_k8_smooths <- gratia::smooth_estimates(models_binned_cut$mod2_k8[[i]], unconditional = TRUE) %>%
+           pptMean = pptMean * 1000)
+  mod2_k8_smooths <- gratia::smooth_estimates(models_binned$mod2_k8[[i]], unconditional = TRUE) %>%
     mutate(Model = "Spatial - low\ncomplexity",
            ci_low= exp(est - se * 1.96),
            ci_high = exp(est + se * 1.96),
            est = exp(est),
-           pptMean = pptMean * 1000,
-           pptCV = pptCV * 100) %>%
+           pptMean = pptMean * 1000) %>%
     select(-c(x,y))
-  mod2_k12_smooths <- gratia::smooth_estimates(models_binned_cut$mod2_k12[[i]], unconditional = TRUE) %>%
+  mod2_k12_smooths <- gratia::smooth_estimates(models_binned$mod2_k12[[i]], unconditional = TRUE) %>%
     mutate(Model = "Spatial - medium\ncomplexity",
            ci_low= exp(est - se * 1.96),
            ci_high = exp(est + se * 1.96),
            est = exp(est),
-           pptMean = pptMean * 1000,
-           pptCV = pptCV * 100) %>%
+           pptMean = pptMean * 1000) %>%
     select(-c(x,y))
-  mod2_k16_smooths <- gratia::smooth_estimates(models_binned_cut$mod2_k16[[i]], unconditional = TRUE) %>%
+  mod2_k16_smooths <- gratia::smooth_estimates(models_binned$mod2_k16[[i]], unconditional = TRUE) %>%
     mutate(Model = "Spatial - high\ncomplexity",
            ci_low= exp(est - se * 1.96),
            ci_high = exp(est + se * 1.96),
            est = exp(est),
-           pptMean = pptMean * 1000,
-           pptCV = pptCV * 100) %>%
+           pptMean = pptMean * 1000) %>%
     select(-c(x,y))
   
   # Combine models into single data frame
@@ -737,7 +964,7 @@ for (i in 1:nrow(models_binned_cut)) {
   
   # Read in data labels lookup table
   
-  var_labels <- read_csv(here("data", "raw", "csv", "var_labels.csv"))
+  var_labels <- read_csv(here("data", "raw", "csv", "var_labels_annual.csv"))
   
   var_list <- var_labels$vars
   
@@ -755,7 +982,7 @@ for (i in 1:nrow(models_binned_cut)) {
     }
   
     # Plot data density plot
-    data_df <- models_binned_cut$data[[i]] %>%
+    data_df <- models_binned$data[[i]] %>%
       select(x, y, all_of(var)) %>%
       rename(z = 3)
     
@@ -776,23 +1003,37 @@ for (i in 1:nrow(models_binned_cut)) {
       rename(var0 = 8) %>%
       drop_na()
     
-    plot <- ggplot(smooth_df, aes(x = var0, y = est)) +
-      geom_hline(yintercept = 1, colour = "grey80") +
-      geom_ribbon(aes(ymin = ci_low, ymax = ci_high,
-                      fill = Model), alpha = 0.7) +
-      geom_line(aes(colour = Model, linetype = Model), alpha = 0.8, lwd = 0.6) +
-      scale_colour_manual(values = c("#AAAAAA", "#bae4b3", "#31a354","#006d2c")) +
-      scale_linetype_manual(values = c("longdash", "solid", "solid", "solid")) +
-      scale_fill_manual(values = c("#DDDDDD", "#daffd3", "#51c384","#208d4c")) +
-      guides(alpha = "none") +
-      ylim(0, 2.5) +
-      labs(x = x_label,
-           y = "Partial effect")
-    
-      # if(var_labels$min_0[var_labels$vars == var] == 1) {
-      #   plot <- plot + scale_x_continuous(limits = c(0, max(smooth_df$var0)))
-      #   density <- density + scale_x_continuous(limits = c(0, max(smooth_df$var0)))
-      # }
+  # Calculate bins
+  diff <- smooth_df$var0[2] - smooth_df$var0[1]
+
+  df_bins <- data_df %>%
+    mutate(bin = cut_interval(z, length = diff)) %>%
+    count(bin, .drop = FALSE)
+
+  alpha_list <- pmin(1, (df_bins$n / (nrow(df_model) / 100))) %>%
+    rep(4)
+  smooth_df$alpha <- alpha_list[1:400]
+  
+  
+  plot <- ggplot(smooth_df, aes(x = var0, y = est,
+                                alpha = alpha
+                                )) +
+    geom_hline(yintercept = 1, colour = "grey80", linetype = "longdash") +
+    # geom_ribbon(aes(ymin = ci_low, ymax = ci_high,
+    # fill = Model)) +
+    geom_line(aes(colour = Model), lwd = 0.6) +
+    scale_colour_manual(values = c("#888888", "#41ab5d", "#238443","#004529")) +
+    scale_linetype_manual(values = c("longdash", "solid", "solid", "solid")) +
+    scale_alpha_continuous(range = c(0.3, 1)) +
+    # scale_fill_manual(values = c("#DDDDDD", "#daffd3", "#51c384","#208d4c")) +
+    guides(alpha = "none") +
+    ylim(0, 2.5) +
+    labs(x = x_label,
+         y = "Partial effect")
+  
+  if(var_labels$min_0[var_labels$vars == var] == 1) {
+    plot <- plot + scale_x_continuous(limits = c(0, max(smooth_df$var0)))
+  }
     
     # Arrange into small multiples with patchwork package 
     density + plot +
@@ -808,6 +1049,8 @@ for (i in 1:nrow(models_binned_cut)) {
            width = 20, height = 30, units = "cm", dpi = 300)
   
 }
+
+
 
 ```
 
