@@ -163,16 +163,20 @@ annual_var_stack_masked <- sa_mask(annual_var_stack, annual = TRUE)
 
 var_stack_all <- c(static_var_stack_masked, annual_var_stack_masked)
 
-writeRaster(var_stack_all, here("data", "processed", "raster", "var_raster_stack.tif"))
+writeRaster(var_stack_all, here("data", "processed", "raster", "var_raster_stack.tif"),
+            overwrite = TRUE)
 
 # Save study area mask as raster for map generation
-writeRaster(study_area_mask, here("data", "processed", "raster", "study_area_mask.tif"))
+writeRaster(study_area_mask, here("data", "processed", "raster", "study_area_mask.tif"),
+            overwrite = TRUE)
 
 ```
 
 Convert whole raster to data frame and reshape to tidy format
 
 ```{r to_df, include = FALSE}
+
+
 
 df <- as.data.frame(var_stack_all, xy = TRUE, cells = TRUE) %>%
   left_join(igbp_index) %>%
@@ -214,9 +218,9 @@ annual_vars <- c("x", "y", "year",
 
 df_multi_annual <- df %>%
   group_by(cell) %>%
-  summarise(pptCV = sd(pptTotal) / mean(pptTotal),
-            pptMeanDaySD = sd(pptMeanDay),
-            seasonOnsetSD = sd(seasonOnsetAnomaly),
+  summarise(pptCV = sd(pptTotal, na.rm = TRUE) / mean(pptTotal, na.rm = TRUE),
+            pptMeanDaySD = sd(pptMeanDay, na.rm = TRUE),
+            seasonOnsetSD = sd(seasonOnsetAnomaly, na.rm = TRUE),
             across(all_of(mean_vars), mean)) %>%
   ungroup() %>%
   select(cell, all_of(mean_vars), all_of(sd_vars)) %>%
@@ -224,9 +228,9 @@ df_multi_annual <- df %>%
 
 df_annual <- df %>%
   group_by(cell) %>%
-  mutate(pptMean = mean(pptTotal),
+  mutate(pptMean = mean(pptTotal, na.rm = TRUE),
          pptAnomaly = pptTotal / pptMean,
-         pptMeanDayAnomaly = pptMeanDay - mean(pptMeanDay)) %>%
+         pptMeanDayAnomaly = pptMeanDay - mean(pptMeanDay, na.rm = TRUE)) %>%
   ungroup() %>%
   select(cell, all_of(annual_vars))
 

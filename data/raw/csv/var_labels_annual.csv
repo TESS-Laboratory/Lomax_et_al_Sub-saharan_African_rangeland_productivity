@@ -1,7 +1,7 @@
-vars,label,parse,min_0,midpoint
+﻿vars,label,parse,min_0,midpoint
 pptMean,MAP ~ (mm ~ yr^-1),1,1,-1
 pptAnomaly,Precipitation anomaly,0,1,1
-tMean,Mean air temperature (�C),0,0,-1
+tMean,Mean air temperature (°C),0,0,-1
 pptIntensity,Intensity (mm ~ d^-1),1,1,-1
 pptGt95Pc,F['95w'],1,1,-1
 pptUgi,Unranked Gini index,0,1,-1

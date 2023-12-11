@@ -27,7 +27,7 @@ Import data:
 
 # Hydrological year dates
 hYear_start <- rast(here("data", "raw", "raster", "season_variables",
-                           "hYearStartMean.tif"))
+                           "hYearStartMean60.tif"))
 
 # Mean season dates - single and double seasons
 
@@ -39,7 +39,7 @@ mean_season_dates_d <- rast(here("data", "raw", "raster", "season_variables",
 # Seasonal rainfall annual dates and anomalies - single seasons
 # Note that annual dates are expressed relative to the hydrological year start
 annual_season_dates_s <- rast(here("data", "raw", "raster", "season_variables",
-                            "annualSeasonDatesSingleHYear.tif"))
+                            "annualSeasonDatesSingleHYear60.tif"))
 
 date_names_s <- c("onset_", "cessation_")
 year_names_s <- as.character(rep(2001:2019, each = 2))
@@ -50,7 +50,7 @@ names(annual_season_dates_s) <- layer_names_s
 
 # Seasonal rainfall dates and anomalies - double seasons
 annual_season_dates_d <- rast(here("data", "raw", "raster", "season_variables",
-                            "annualSeasonDatesDoubleHYear.tif"))
+                            "annualSeasonDatesDoubleHYear60.tif"))
 
 date_names_d <- c("onset1_", "cessation1_", "onset2_", "cessation2_")
 year_names_d <- as.character(rep(2001:2019, each = 4))
@@ -289,7 +289,7 @@ onset_anomaly_mask <- merge(
   (abs(onset_date_anomaly_d1) <= 60 & abs(onset_date_anomaly_d2) <= 60)
 )
 
-onset_anomaly_d <- mean(onset_date_anomaly_d1, onset_date_anomaly_d2)
+onset_date_anomaly_d <- mean(onset_date_anomaly_d1, onset_date_anomaly_d2)
 
 onset_anomaly_all <- onset_date_anomaly_s %>%
   merge(onset_date_anomaly_d) %>%

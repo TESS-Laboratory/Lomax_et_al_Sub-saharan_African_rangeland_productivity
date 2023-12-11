@@ -56,7 +56,7 @@ study_area_mask <- rast(here("data", "processed", "raster", "study_area_mask.tif
 
 
 
-```{r eda, eval = FALSE, echo = FALSE}
+```{r scatter_plots, eval = FALSE, echo = FALSE}
 
 plot_dir <- here("results", "figures")
 
@@ -67,7 +67,7 @@ plot_sample <- sample_n(df_cover, 4000)
 
 base_plot <- ggplot(plot_sample,
                     aes(fill = cover, colour = cover),
-                    alpha = 0.6
+                    alpha = 0.5
                     ) +
   theme(axis.text = element_text(size = 8), axis.title = element_text(size = 10),
         legend.text = element_text(size = 10)) +
@@ -75,17 +75,17 @@ base_plot <- ggplot(plot_sample,
   theme_bw() +
   guides(colour = guide_legend(override.aes = list(size = 2)))
 
-pptMean_pptCV <- base_plot + geom_point(aes(x = pptMean, y = pptCV), size = 0.2) +
+pptMean_pptCV <- base_plot + geom_point(aes(x = pptMean, y = pptCV), size = 0.1) +
   labs(x = expression(pptMean ~ (mm ~ yr^-1)), y = "CV (%)")
-pptMean_int <- base_plot + geom_point(aes(x = pptMean, y = pptIntensity), size = 0.2) +
+pptMean_int <- base_plot + geom_point(aes(x = pptMean, y = pptIntensity), size = 0.1) +
   labs(x = expression(pptMean ~ (mm ~ yr^-1)), y = expression(Intensity ~ (mm ~ d^-1)))
-pptMean_season <- base_plot + geom_point(aes(x = pptMean, y = seasonLength), size = 0.2) +
+pptMean_season <- base_plot + geom_point(aes(x = pptMean, y = seasonLength), size = 0.1) +
   labs(x = expression(pptMean ~ (mm ~ yr^-1)), y = "Rainy season\nlength (d)")
-pptMean_onset_sd <- base_plot + geom_point(aes(x = pptMean, y = seasonOnsetSD), size = 0.2) +
+pptMean_onset_sd <- base_plot + geom_point(aes(x = pptMean, y = seasonOnsetSD), size = 0.1) +
   labs(x = expression(pptMean ~ (mm ~ yr^-1)), y = "Season\nonset SD")
-pptMean_ugi <- base_plot + geom_point(aes(x = pptMean, y = pptUgi), size = 0.2) +
+pptMean_ugi <- base_plot + geom_point(aes(x = pptMean, y = pptUgi), size = 0.1) +
   labs(x = expression(pptMean ~ (mm ~ yr^-1)), y = "UGi")
-pptMean_wet95 <- base_plot + geom_point(aes(x = pptMean, y = pptGt95Pc), size = 0.2) +
+pptMean_wet95 <- base_plot + geom_point(aes(x = pptMean, y = pptGt95Pc), size = 0.1) +
   labs(x = expression(pptMean ~ (mm ~ yr^-1)), y = expression(F["95w"]))
 
 p1 <- ggarrange(pptMean_pptCV, pptMean_ugi, pptMean_season, pptMean_onset_sd, pptMean_int, pptMean_wet95,
@@ -93,36 +93,36 @@ p1 <- ggarrange(pptMean_pptCV, pptMean_ugi, pptMean_season, pptMean_onset_sd, pp
 
 gpp_expr <- expression(GPP ~ (gC ~ m^-2 ~ yr^-1))
 
-gpp_sand <- base_plot + geom_point(aes(x = sand, y = gpp), size = 0.2, alpha = 0.75) +
+gpp_sand <- base_plot + geom_point(aes(x = sand, y = gpp), size = 0.1, alpha = 0.5) +
   labs(x = "Soil sand fraction", y = gpp_expr)
-gpp_clay <- base_plot + geom_point(aes(x = clay, y = gpp), size = 0.2, alpha = 0.75) +
+gpp_clay <- base_plot + geom_point(aes(x = clay, y = gpp), size = 0.1, alpha = 0.5) +
   labs(x = "Soil clay fraction", y = gpp_expr)
-gpp_T <- base_plot + geom_point(aes(x = tMean, y = gpp), size = 0.2, alpha = 0.75) +
+gpp_T <- base_plot + geom_point(aes(x = tMean, y = gpp), size = 0.1, alpha = 0.5) +
   labs(x = "Mean air temperature\n(\u00B0C)", y = gpp_expr)
-gpp_fire <- base_plot + geom_point(aes(x = fire, y = gpp), size = 0.2, alpha = 0.75) +
+gpp_fire <- base_plot + geom_point(aes(x = fire, y = gpp), size = 0.1, alpha = 0.5) +
   labs(x = expression(Fire ~ frequency ~ (yr^-1)), y = gpp_expr)
 
-gpp_pptMean <- base_plot + geom_point(aes(x = pptMean, y = gpp), size = 0.2, alpha = 0.75) +
+gpp_pptMean <- base_plot + geom_point(aes(x = pptMean, y = gpp), size = 0.1, alpha = 0.5) +
   labs(x = expression(pptMean ~ (mm ~ yr^-1)), y = gpp_expr)
-gpp_pptCV <- base_plot + geom_point(aes(x = pptCV, y = gpp), size = 0.2, alpha = 0.75) +
+gpp_pptCV <- base_plot + geom_point(aes(x = pptCV, y = gpp), size = 0.1, alpha = 0.5) +
   labs(x = "CV of annual\nprecipitation (%)", y = gpp_expr)
-gpp_int <- base_plot + geom_point(aes(x = pptIntensity, y = gpp), size = 0.2, alpha = 0.75) +
+gpp_int <- base_plot + geom_point(aes(x = pptIntensity, y = gpp), size = 0.1, alpha = 0.5) +
   labs(x = expression(Precipitation ~ intensity ~(mm ~ d^-1)), y = gpp_expr)
-gpp_dry <- base_plot + geom_point(aes(x = pptDryDays, y = gpp), size = 0.2, alpha = 0.75) +
+gpp_dry <- base_plot + geom_point(aes(x = pptDryDays, y = gpp), size = 0.1, alpha = 0.5) +
   labs(x = "Fraction of dry\ndays per year", y = gpp_expr)
-gpp_ugi <- base_plot + geom_point(aes(x = pptUgi, y = gpp), size = 0.2, alpha = 0.75) +
+gpp_ugi <- base_plot + geom_point(aes(x = pptUgi, y = gpp), size = 0.1, alpha = 0.5) +
   labs(x = "UGi", y = gpp_expr)
-gpp_wet95 <- base_plot + geom_point(aes(x = pptGt95Pc, y = gpp), size = 0.2, alpha = 0.75) +
+gpp_wet95 <- base_plot + geom_point(aes(x = pptGt95Pc, y = gpp), size = 0.1, alpha = 0.5) +
   labs(x = expression(F["95w"]), y = gpp_expr)
-gpp_season <- base_plot + geom_point(aes(x = seasonLength, y = gpp), size = 0.2, alpha = 0.75) +
+gpp_season <- base_plot + geom_point(aes(x = seasonLength, y = gpp), size = 0.1, alpha = 0.5) +
   labs(x = "Wet season\nlength (days)", y = gpp_expr)
-gpp_onset_sd <- base_plot + geom_point(aes(x = seasonOnsetSD, y = gpp), size = 0.2, alpha = 0.75) +
+gpp_onset_sd <- base_plot + geom_point(aes(x = seasonOnsetSD, y = gpp), size = 0.1, alpha = 0.5) +
   labs(x = "SD of wet\nseason onset (days)", y = gpp_expr)
-gpp_mean_day_sd <- base_plot + geom_point(aes(x = pptMeanDaySD, y = gpp), size = 0.2, alpha = 0.75) +
+gpp_mean_day_sd <- base_plot + geom_point(aes(x = pptMeanDaySD, y = gpp), size = 0.1, alpha = 0.5) +
   labs(x = "SD of mean rainfall day (days)", y = gpp_expr)
-gpp_soilN <- base_plot + geom_point(aes(x = soilN, y = gpp), size = 0.2, alpha = 0.75) +
+gpp_soilN <- base_plot + geom_point(aes(x = soilN, y = gpp), size = 0.1, alpha = 0.5) +
   labs(x = expression(Soil ~ nitrogen ~ (g ~ kg^-1)), gpp_expr)
-gpp_soilP <- base_plot + geom_point(aes(x = soilP, y = gpp), size = 0.2, alpha = 0.75) +
+gpp_soilP <- base_plot + geom_point(aes(x = soilP, y = gpp), size = 0.1, alpha = 0.5) +
   labs(x = "Soil extractable\nphosphorus (ppm)", y = gpp_expr)
 
 p2 <- ggarrange(gpp_pptMean, gpp_pptCV, gpp_int, gpp_wet95, gpp_ugi, gpp_season, gpp_onset_sd, gpp_mean_day_sd,
@@ -201,15 +201,18 @@ Exploratory maps of key covariates:
 
 ```{r eda_maps, eval = FALSE, echo = FALSE, results = "hide"}
 
+plot_dir <- here("results", "figures")
+
 # Create base map for all maps
-africa_basemap <- tm_shape(africa) + tm_borders() +
+
+africa_basemap <- tm_shape(africa) + tm_borders(col = "grey55") +
   tm_layout(main.title.position = 0.1,
             legend.position = c("left", "bottom"), legend.text.size = 0.5,
             legend.title.size = 0.85,
             legend.bg.color = "white", legend.bg.alpha = 0,
             legend.height = -0.4, legend.width = 0.6) +
   tm_graticules(x = c(-15, 0, 15, 30, 45), y = c(-30, -15, 0, 15, 30),
-                col = "grey60", labels.size = 0.4, lwd = 0.75)
+                col = "grey90", alpha = 0.6, labels.size = 0.6, lwd = 0.75)
 
 # Create raster to mask excluded regions
 outside_sa <- mask(study_area_mask, study_area_mask, maskvalues = c(1, NA))
@@ -243,20 +246,20 @@ map_map <- tm_shape(var_stack[["pptMean"]]) +
 
 cv_map <- tm_shape(var_stack[["pptCV"]]) +
   tm_raster(style = "cont", n = 10, palette = "RdPu", title = "CV of annual\nprecipitation (%)",
-            breaks = seq(0, 50, 10)) +
+            breaks = seq(0, 0.60, 0.10)) +
   sa_basemap +
   africa_basemap
 
 intensity_map <- tm_shape(var_stack[["pptIntensity"]]) +
   tm_raster(style = "cont", palette = "PRGn", title = expression(Intensity ~ (mm ~ day^-1)),
-            breaks = seq(0, 20, 4)) +
+            breaks = seq(0, 25, 5)) +
   sa_basemap +
   africa_basemap +
   tm_layout(main.title = "d)")
 
 ugi_map <- tm_shape(var_stack[["pptUgi"]]) +
   tm_raster(style = "cont", n = 10, palette = "-PRGn", title = "UGi of daily\nprecipitation",
-            breaks = seq(0.1, 0.5, 0.1), midpoint = 0.3) +
+            breaks = seq(0.1, 0.6, 0.1), midpoint = 0.35) +
   sa_basemap +
   africa_basemap
 
@@ -270,19 +273,19 @@ wet95_map <- tm_shape(var_stack[["pptGt95Pc"]]) +
 
 season_map <- tm_shape(var_stack[["seasonLength"]] %>% mask(var_stack[["seasonLength"]] > 0, maskvalues = c(NA, 0))) +
   tm_raster(style = "cont", palette = "RdYlBu", title = "Rainy season\nlength (days)",
-            breaks = seq(50, 250, 50), midpoint = 150) +
+            breaks = seq(0, 300, 50), midpoint = 150) +
   sa_basemap +
   africa_basemap
 
 onset_sd_map <- tm_shape(var_stack[["seasonOnsetSD"]]) +
   tm_raster(style = "cont", palette = "-RdYlBu", title = "Season onset SD",
-            breaks = seq(0, 50, 10)) +
+            breaks = seq(0, 40, 10)) +
   sa_basemap +
   africa_basemap
 
 mean_day_sd_map <- tm_shape(var_stack[["pptMeanDaySD"]]) +
   tm_raster(style = "cont", palette = "-RdYlBu", title = "Mean rainfall date SD",
-            breaks = seq(0, 50, 10)) +
+            breaks = seq(0, 40, 10)) +
   sa_basemap +
   africa_basemap
 
@@ -296,7 +299,7 @@ soilN_map <- tm_shape(var_stack[["soilN"]]) +
 
 soilP_map <- tm_shape(var_stack[["soilP"]]) +
   tm_raster(style = "cont", palette = "YlGn", title = expression(soilP ~ (g ~ kg^-1)),
-            breaks = seq(0, 20, 4)) +
+            breaks = seq(0, 25, 5)) +
   sa_basemap +
   africa_basemap
 
@@ -329,17 +332,16 @@ fire_map <- tm_shape(var_stack[["modisBurn"]]) +
   sa_basemap +
   africa_basemap
 
-
 # Save map figures to directory
 
 tmap_save(sa_map,
           here(plot_dir, "sa_map_plot.png"),
-          width = 79, height = 70, units = "mm", dpi = 400)
+          width = 16, height = 12, units = "cm", dpi = 300)
 
 multi_plot <- tmap_arrange(gpp_map, map_map, T_map, intensity_map)
 
 tmap_save(multi_plot,
           here(plot_dir, "multi_map_plot.png"),
-          width = 168, height = 168, units = "mm", dpi = 400)
+          width = 24, height = 18, units = "cm", dpi = 300)
 
 ```

@@ -1,7 +1,7 @@
-vars,label,parse,min_0
+﻿vars,label,parse,min_0
 pptMean,MAP ~ (mm ~ yr^-1),1,1
 pptCV,Interannual CV,0,1
-tMean,Mean air temperature (�C),0,0
+tMean,Mean air temperature (°C),0,0
 pptIntensity,Intensity (mm ~ d^-1),1,1
 pptGt95Pc,F['95w'],1,1
 pptUgi,Unranked Gini index,0,0
