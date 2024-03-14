@@ -51,7 +51,7 @@ plot_dir <- here("results", "figures")
 ggplot2::theme_set(theme_bw())
 
 # Establish number of cores for parallel computing
-nc <- (detectCores() / 4)
+nc <- (detectCores() - 2)
 
 ```
 
@@ -172,20 +172,28 @@ analysis above.
 
 ```{r gam_prep, include = FALSE}
 
+target_vars <- c(
+  "cover",
+  "gpp",
+  "pptMean", "pptIntensity", "pptGt95Pc", "pptUgi", "pptCV",
+  "pptMeanDaySD", "seasonLength", "seasonOnsetSD",
+  "tMean", "fire", "sand", "soilN"
+)
+
 # Select model variables and scale some to more consistent units (0-1)
 df_model <- df %>%
-  dplyr::select(x, y, gpp, pptMean, pptIntensity, pptGt95Pc, pptUgi, pptCV,
-                pptMeanDaySD, seasonLength, seasonOnsetSD,
-                tMean, fire, sand, soilN, ) %>%
-  filter(seasonLength > 0 & !is.na(seasonOnsetSD)) %>%    # Remove pixels with season length == 0 (errors)
+  dplyr::select(x, y, all_of(target_vars)) %>%
+  filter(seasonLength > 0 & !is.na(seasonOnsetSD)) %>%  # Remove pixels with season length == 0 (errors)
+  filter(cover != "Woody savannas") %>%  # Remove woody savanna cover class (too few points)
   mutate(gpp = gpp * 0.001,
          sand = sand * 0.01,
-         pptMean = pptMean * 0.001)
+         pptMean = pptMean * 0.001,
+         cover = str_replace(cover, " ", "_"))
 
 # Write intermediate CSV for modelling
 
-# write_csv(df_model,
-#           here("data", "processed", "csv", "df_model_multi_annual.csv"))
+write_csv(df_model,
+          here("data", "processed", "csv", "df_model_multi_annual.csv"))
 
 
 ```
@@ -198,106 +206,116 @@ df_model <- read_csv(here("data", "processed", "csv", "df_model_multi_annual.csv
 
 cl <- makeCluster(nc)
 
-# Non-spatial model
-tic()
-mod1 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
-              s(pptCV, k = 8, bs = "ts") +
-              s(pptIntensity, k = 8, bs = "ts") +
-              s(pptGt95Pc, k = 8, bs = "ts") +
-              s(pptUgi, k = 8, bs = "ts") +
-              s(pptMeanDaySD, k = 8, bs = "ts") +
-              s(seasonLength, k = 8, bs = "ts") +
-              s(seasonOnsetSD, k = 8, bs = "ts") +
-              s(tMean, k = 8, bs = "ts") +
-              s(fire, k = 8, bs = "ts") +
-              s(sand, k = 8, bs = "ts") +
-              s(soilN, k = 8, bs = "ts"),
-            data = df_model,
-            method = "REML",
-            family = Gamma(link = "log"),
-            select = TRUE,
-            samfrac = 0.1,
-            cluster = cl)
-toc()
+cover_classes <- unique(df_model$cover)
 
-# Save model results
-write_rds(mod1, here("data", "processed", "models", "mod1.rds"))
+for (i in cover_classes) {
+  
+  message("Fitting models: ", i)
+  
+  df_model_class <- filter(df_model, cover == i)
+  
+  # Non-spatial model
+  tic()
+  mod1 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
+                s(pptCV, k = 8, bs = "ts") +
+                s(pptIntensity, k = 8, bs = "ts") +
+                s(pptGt95Pc, k = 8, bs = "ts") +
+                s(pptUgi, k = 8, bs = "ts") +
+                s(pptMeanDaySD, k = 8, bs = "ts") +
+                s(seasonLength, k = 8, bs = "ts") +
+                s(seasonOnsetSD, k = 8, bs = "ts") +
+                s(tMean, k = 8, bs = "ts") +
+                s(fire, k = 8, bs = "ts") +
+                s(sand, k = 8, bs = "ts") +
+                s(soilN, k = 8, bs = "ts"),
+              data = df_model_class,
+              method = "REML",
+              family = Gamma(link = "log"),
+              select = TRUE,
+              samfrac = 0.1,
+              cluster = cl)
+  toc()
+  
+  # Save model results
+  write_rds(mod1, here("data", "processed", "models", paste0("mod1_", i, ".rds")))
+  
+  # Spatial model - low complexity (k = c(8,8) for spatial term)
+  tic()
+  mod2_k8 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
+                s(pptCV, k = 8, bs = "ts") +
+                s(pptIntensity, k = 8, bs = "ts") +
+                s(pptGt95Pc, k = 8, bs = "ts") +
+                s(pptUgi, k = 8, bs = "ts") +
+                s(pptMeanDaySD, k = 8, bs = "ts") +
+                s(seasonLength, k = 8, bs = "ts") +
+                s(seasonOnsetSD, k = 8, bs = "ts") +
+                s(tMean, k = 8, bs = "ts") +
+                s(fire, k = 8, bs = "ts") +
+                s(sand, k = 8, bs = "ts") +
+                s(soilN, k = 8, bs = "ts") +
+                te(x, y, k = c(8, 8), bs = "ts"),
+              data = df_model_class,
+              method = "REML",
+              family = Gamma(link = "log"),
+              samfrac = 0.1,
+              select = TRUE,
+              cluster = cl)
+  toc()
+  
+  write_rds(mod2_k8, here("data", "processed", "models", paste0("mod2_k8_", i, ".rds")))
+  
+  # Spatial model - medium complexity (k = c(12,12) for spatial term)
+  tic()
+  mod2_k12 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
+                s(pptCV, k = 8, bs = "ts") +
+                s(pptIntensity, k = 8, bs = "ts") +
+                s(pptGt95Pc, k = 8, bs = "ts") +
+                s(pptUgi, k = 8, bs = "ts") +
+                s(pptMeanDaySD, k = 8, bs = "ts") +
+                s(seasonLength, k = 8, bs = "ts") +
+                s(seasonOnsetSD, k = 8, bs = "ts") +
+                s(tMean, k = 8, bs = "ts") +
+                s(fire, k = 8, bs = "ts") +
+                s(sand, k = 8, bs = "ts") +
+                s(soilN, k = 8, bs = "ts") +
+                te(x, y, k = c(12, 12), bs = "ts"),
+              data = df_model_class,
+              method = "REML",
+              family = Gamma(link = "log"),
+              select = TRUE,
+              samfrac = 0.1,
+              cluster = cl)
+  toc()
+  
+  write_rds(mod2_k12, here("data", "processed", "models", paste0("mod2_k12_", i, ".rds")))
+  
+  # Spatial model - high complexity (k = c(16,16) for spatial term)
+  
+  # tic()
+  # mod2_k16 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
+  #               s(pptCV, k = 8, bs = "ts") +
+  #               s(pptIntensity, k = 8, bs = "ts") +
+  #               s(pptGt95Pc, k = 8, bs = "ts") +
+  #               s(pptUgi, k = 8, bs = "ts") +
+  #               s(pptMeanDaySD, k = 8, bs = "ts") +
+  #               s(seasonLength, k = 8, bs = "ts") +
+  #               s(seasonOnsetSD, k = 8, bs = "ts") +
+  #               s(tMean, k = 8, bs = "ts") +
+  #               s(fire, k = 8, bs = "ts") +
+  #               s(sand, k = 8, bs = "ts") +
+  #               s(soilN, k = 8, bs = "ts") +
+  #               te(x, y, k = c(16, 16), bs = "ts"),
+  #             data = df_model_class,
+  #             method = "REML",
+  #             family = Gamma(link = "log"),
+  #             select = TRUE,
+  #             samfrac = 0.1,
+  #             cluster = cl)
+  # toc()
+  # 
+  # write_rds(mod2_k16, here("data", "processed", "models", paste0("mod2_k16_", i, ".rds")))
 
-# Spatial model - low complexity (k = c(8,8) for spatial term)
-tic()
-mod2_k8 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
-              s(pptCV, k = 8, bs = "ts") +
-              s(pptIntensity, k = 8, bs = "ts") +
-              s(pptGt95Pc, k = 8, bs = "ts") +
-              s(pptUgi, k = 8, bs = "ts") +
-              s(pptMeanDaySD, k = 8, bs = "ts") +
-              s(seasonLength, k = 8, bs = "ts") +
-              s(seasonOnsetSD, k = 8, bs = "ts") +
-              s(tMean, k = 8, bs = "ts") +
-              s(fire, k = 8, bs = "ts") +
-              s(sand, k = 8, bs = "ts") +
-              s(soilN, k = 8, bs = "ts") +
-              te(x, y, k = c(8, 8), bs = "ts"),
-            data = df_model,
-            method = "REML",
-            family = Gamma(link = "log"),
-            samfrac = 0.1,
-            select = TRUE,
-            cluster = cl)
-toc()
-
-write_rds(mod2_k8, here("data", "processed", "models", "mod2_k8.rds"))
-
-# Spatial model - medium complexity (k = c(12,12) for spatial term)
-tic()
-mod2_k12 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
-              s(pptCV, k = 8, bs = "ts") +
-              s(pptIntensity, k = 8, bs = "ts") +
-              s(pptGt95Pc, k = 8, bs = "ts") +
-              s(pptUgi, k = 8, bs = "ts") +
-              s(pptMeanDaySD, k = 8, bs = "ts") +
-              s(seasonLength, k = 8, bs = "ts") +
-              s(seasonOnsetSD, k = 8, bs = "ts") +
-              s(tMean, k = 8, bs = "ts") +
-              s(fire, k = 8, bs = "ts") +
-              s(sand, k = 8, bs = "ts") +
-              s(soilN, k = 8, bs = "ts") +
-              te(x, y, k = c(12, 12), bs = "ts"),
-            data = df_model,
-            method = "REML",
-            family = Gamma(link = "log"),
-            select = TRUE,
-            samfrac = 0.1,
-            cluster = cl)
-toc()
-
-write_rds(mod2_k12, here("data", "processed", "models", "mod2_k12.rds"))
-
-# Spatial model - high complexity (k = c(16,16) for spatial term)
-
-tic()
-mod2_k16 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
-              s(pptCV, k = 8, bs = "ts") +
-              s(pptIntensity, k = 8, bs = "ts") +
-              s(pptGt95Pc, k = 8, bs = "ts") +
-              s(pptUgi, k = 8, bs = "ts") +
-              s(pptMeanDaySD, k = 8, bs = "ts") +
-              s(seasonLength, k = 8, bs = "ts") +
-              s(seasonOnsetSD, k = 8, bs = "ts") +
-              s(tMean, k = 8, bs = "ts") +
-              s(fire, k = 8, bs = "ts") +
-              s(sand, k = 8, bs = "ts") +
-              s(soilN, k = 8, bs = "ts") +
-              te(x, y, k = c(16, 16), bs = "ts"),
-            data = df_model,
-            method = "REML",
-            family = Gamma(link = "log"),
-            select = TRUE,
-            samfrac = 0.1,
-            cluster = cl)
-toc()
-
-write_rds(mod2_k16, here("data", "processed", "models", "mod2_k16.rds"))
+}
 
 stopCluster(cl)
 
