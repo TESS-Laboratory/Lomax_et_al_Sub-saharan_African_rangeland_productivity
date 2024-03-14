@@ -49,7 +49,7 @@ plot_dir <- here("results", "figures")
 ggplot2::theme_set(theme_bw())
 
 # Establish number of cores for parallel computing
-nc <- (detectCores() / 4)
+nc <- (detectCores() - 2)
 
 ```
 
@@ -172,6 +172,7 @@ analysis above.
 # Select variables equivalent to multi-annual analysis
 
 target_vars <- c(
+  "cover",
   "gpp",
   "pptTotal", "pptMean", "pptAnomaly",
   "pptIntensity", "pptGt95Pc", "pptUgi",
@@ -181,17 +182,16 @@ target_vars <- c(
 
 df_model <- df %>%
   select(cell, x, y, year, all_of(target_vars)) %>%
+  filter(cover != "Woody savannas") %>%
   mutate(pptTotal = 0.001 * pptTotal,
-         pptMean = 0.001 * pptMean) %>%
+         pptMean = 0.001 * pptMean,
+         cover = str_replace(cover, " ", "_")) %>%
   filter(!is.na(seasonOnsetAnomaly))
 
-
-# Subset of 10% of pixels to reduce model fitting issues
+# Subset of 10% of rows to reduce model fitting issues
 set.seed(123)
-unique_cells <- unique(df_model$cell)
-sample_cells <- sample(unique_cells, length(unique_cells) * 0.1)
 
-df_model_sample <- filter(df_model, cell %in% sample_cells)
+df_model_sample <- sample_frac(df_model, 0.1)
 
 write_csv(df_model,
           here("data", "processed", "csv", "df_model_annual.csv"))
@@ -209,17 +209,24 @@ general time-related trends and potential temporal autocorrelation. In this
 model, we don't include any interaction terms between covariates or between the
 spatial and temporal parts of the model
 
-```{r standard_models}
+```{r standard_models, eval = FALSE}
 
-df_model <- read_csv(here("data", "processed", "csv", "df_model_annual.csv"))
-df_model_sample <- read_csv(here("data", "processed", "csv", "df_model_annual_sample.csv"))
+# df_model <- read_csv(here("data", "processed", "csv", "df_model_annual.csv"))
+df_model_sample <- read_csv(here("data", "processed", "csv", "df_model_annual_sample.csv")) 
 
 cl <- makeCluster(nc)
 
-# Model with mean precipitation and annual anomaly
+# Loop through land cover classes to fit models
 
-tic()
-mod1 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
+cover_classes <- unique(df_model_sample$cover)
+
+for (i in cover_classes) {
+  
+  df_model_class <- filter(df_model_sample, cover == i)
+  
+  message("Fitting model 1 for ", i)
+  tic()
+  mod1 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
               s(pptAnomaly, k = 8, bs = "ts") +
               s(pptMeanDayAnomaly, k = 8, bs = "ts") +
               s(pptIntensity, k = 8, bs = "ts") +
@@ -232,18 +239,19 @@ mod1 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
               s(sand, k = 8, bs = "ts") +
               s(soilN, k = 8, bs = "ts") +
               s(year, k = 8, bs = "ts"),
-            data = df_model_sample,
+            data = df_model_class,
             method = "REML",
             family = Gamma(link = "log"),
             select = TRUE,
             samfrac = 0.1,
             cluster = cl)
-toc()
+  toc()
 
-write_rds(mod1, here("data", "processed", "models", "mod1_annual_sample.rds"))
+  write_rds(mod1, here("data", "processed", "models", paste0("mod1_", i, "_annual.rds")))
 
-tic()
-mod2_k8 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
+  message("Fitting model 2k8 for ", i)
+  tic()
+  mod2_k8 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
               s(pptAnomaly, k = 8, bs = "ts") +
               s(pptMeanDayAnomaly, k = 8, bs = "ts") +
               s(pptIntensity, k = 8, bs = "ts") +
@@ -257,18 +265,19 @@ mod2_k8 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
               s(soilN, k = 8, bs = "ts") +
               te(x, y, k = c(8, 8), bs = "ts") +
               s(year, k = 8, bs = "ts"),
-            data = df_model_sample,
+            data = df_model_class,
             method = "REML",
             family = Gamma(link = "log"),
             select = TRUE,
             samfrac = 0.1,
             cluster = cl)
-toc()
+  toc()
 
-write_rds(mod2_k8, here("data", "processed", "models", "mod2_k8_annual_sample.rds"))
+  write_rds(mod2_k8, here("data", "processed", "models", paste0("mod2_k8_", i, "_annual.rds")))
 
-tic()
-mod2_k12 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
+  message("Fitting model 2k12 for ", i)
+  tic()
+  mod2_k12 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
               s(pptAnomaly, k = 8, bs = "ts") +
               s(pptMeanDayAnomaly, k = 8, bs = "ts") +
               s(pptIntensity, k = 8, bs = "ts") +
@@ -282,201 +291,95 @@ mod2_k12 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
               s(soilN, k = 8, bs = "ts") +
               te(x, y, k = c(12, 12), bs = "ts") +
               s(year, k = 8, bs = "ts"),
-            data = df_model_sample,
+            data = df_model_class,
             method = "REML",
             family = Gamma(link = "log"),
             select = TRUE,
             samfrac = 0.1,
             cluster = cl)
-toc()
+  toc()
 
-write_rds(mod2_k12, here("data", "processed", "models", "mod2_k12_annual_sample.rds"))
+  write_rds(mod2_k12, here("data", "processed", "models", paste0("mod2_k12_", i, "_annual.rds")))
 
-tic()
-mod2_k16 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
-              s(pptAnomaly, k = 8, bs = "ts") +
-              s(pptMeanDayAnomaly, k = 8, bs = "ts") +
-              s(pptIntensity, k = 8, bs = "ts") +
-              s(pptGt95Pc, k = 8, bs = "ts") +
-              s(pptUgi, k = 8, bs = "ts") +
-              s(seasonLength, k = 8, bs = "ts") +
-              s(seasonOnsetAnomaly, k = 8, bs = "ts") +
-              s(tMean, k = 8, bs = "ts") +
-              s(fire, k = 8, bs = "ts") +
-              s(sand, k = 8, bs = "ts") +
-              s(soilN, k = 8, bs = "ts") +
-              te(x, y, k = c(16, 16), bs = "ts") +
-              s(year, k = 8, bs = "ts"),
-            data = df_model_sample,
-            method = "REML",
-            family = Gamma(link = "log"),
-            select = TRUE,
-            samfrac = 0.1,
-            cluster = cl
-)
-toc()
+  # message("Fitting model 2k16 for ", i)
+  # tic()
+  # mod2_k16 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
+  #             s(pptAnomaly, k = 8, bs = "ts") +
+  #             s(pptMeanDayAnomaly, k = 8, bs = "ts") +
+  #             s(pptIntensity, k = 8, bs = "ts") +
+  #             s(pptGt95Pc, k = 8, bs = "ts") +
+  #             s(pptUgi, k = 8, bs = "ts") +
+  #             s(seasonLength, k = 8, bs = "ts") +
+  #             s(seasonOnsetAnomaly, k = 8, bs = "ts") +
+  #             s(tMean, k = 8, bs = "ts") +
+  #             s(fire, k = 8, bs = "ts") +
+  #             s(sand, k = 8, bs = "ts") +
+  #             s(soilN, k = 8, bs = "ts") +
+  #             te(x, y, k = c(16, 16), bs = "ts") +
+  #             s(year, k = 8, bs = "ts"),
+  #           data = df_model_class,
+  #           method = "REML",
+  #           family = Gamma(link = "log"),
+  #           select = TRUE,
+  #           samfrac = 0.1,
+  #           cluster = cl)
+  # toc()
 
-write_rds(mod2_k16, here("data", "processed", "models", "mod2_k16_annual_sample.rds"))
+  # write_rds(mod2_k16, here("data", "processed", "models", paste0("mod2_k16", i, "_annual.rds")))
 
+}
 stopCluster(cl)
 
 ```
 
 ```{r standard_models_viz}
 
-mod1 <- read_rds(here("data", "processed", "models", "mod1_annual_sample.rds"))
-mod2_k8 <- read_rds(here("data", "processed", "models", "mod2_k8_annual_sample.rds"))
-mod2_k12 <- read_rds(here("data", "processed", "models", "mod2_k12_annual_sample.rds"))
-mod2_k16 <- read_rds(here("data", "processed", "models", "mod2_k16_annual_sample.rds"))
+mod1_grass <- read_rds(here("data", "processed", "models", "mod1_Grasslands_annual.rds"))
+mod2_k8_grass <- read_rds(here("data", "processed", "models", "mod2_k8_Grasslands_annual.rds"))
+mod2_k12_grass <- read_rds(here("data", "processed", "models", "mod2_k12_Grasslands_annual.rds"))
+# mod2_k16_grass <- read_rds(here("data", "processed", "models", "mod2_k16Grasslands_annual.rds"))
 
+mod1_shrub <- read_rds(here("data", "processed", "models", "mod1_Open_shrublands_annual.rds"))
+mod2_k8_shrub <- read_rds(here("data", "processed", "models", "mod2_k8_Open_shrublands_annual.rds"))
+mod2_k12_shrub <- read_rds(here("data", "processed", "models", "mod2_k12_Open_shrublands_annual.rds"))
+# mod2_k16_shrub <- read_rds(here("data", "processed", "models", "mod2_k16Open_shrublands_annual.rds"))
 
-mod1_diag <- appraise(mod1, ci_alpha = 0.5, point_alpha = 0.05, n_bins = 50)
-mod2_k8_diag <- appraise(mod2_k8, ci_alpha = 0.5, point_alpha = 0.05, n_bins = 50)
-mod2_k12_diag <- appraise(mod2_k12, ci_alpha = 0.5, point_alpha = 0.05, n_bins = 50)
-mod2_k16_diag <- appraise(mod2_k16, ci_alpha = 0.5, point_alpha = 0.05, n_bins = 50)
+mod1_savanna <- read_rds(here("data", "processed", "models", "mod1_Open_savannas_annual.rds"))
+mod2_k8_savanna <- read_rds(here("data", "processed", "models", "mod2_k8_Open_savannas_annual.rds"))
+mod2_k12_savanna <- read_rds(here("data", "processed", "models", "mod2_k12_Open_savannas_annual.rds"))
+# mod2_k16_savanna <- read_rds(here("data", "processed", "models", "mod2_k16Open_savannas_annual.rds"))
 
-mod1_diag
-mod2_k8_diag 
-mod2_k12_diag
-mod2_k16_diag
+# mod_diag_grass <- appraise(mod2_k12_grass, ci_alpha = 0.5, point_alpha = 0.05, n_bins = 50)
+# mod_diag_shrub <- appraise(mod2_k12_shrub, ci_alpha = 0.5, point_alpha = 0.05, n_bins = 50)
+# mod_diag_savanna <- appraise(mod2_k12_savanna, ci_alpha = 0.5, point_alpha = 0.05, n_bins = 50)
 
-ggsave(here("results", "figures", "mod1_diag_annual.png"), mod1_diag,
-       width = 26.5, height = 22, units = "cm", dpi = 200)
-ggsave(here("results", "figures", "mod2_k8_diag_annual.png"), mod2_k8_diag,
-       width = 26.5, height = 22, units = "cm", dpi = 200)
-ggsave(here("results", "figures", "mod2_k12_diag_annual.png"), mod2_k16_diag,
-       width = 26.5, height = 22, units = "cm", dpi = 200)
-ggsave(here("results", "figures", "mod2_k16_diag_annual.png"), mod2_k16_diag,
-       width = 26.5, height = 22, units = "cm", dpi = 200)
-
-```
-
-
-```{r temporal_autocorrelation_check}
-
-mod_residuals <- df_model_sample %>%
-  mutate(mod1_resids = residuals(mod1, type = "response"),
-         mod2_k8_resids = residuals(mod2_k8, type = "response"),
-         mod2_k12_resids = residuals(mod2_k12, type = "response"),
-         mod2_k16_resids = residuals(mod2_k16, type = "response"))
-
-mod_ac <- mod_residuals %>%
-  select(cell, x, y, year, gpp, pptMean, ends_with("resids")) %>%
-  group_by(cell) %>%
-  arrange(year, .by_group = TRUE) %>%
-  reframe(x = mean(x),
-          y = mean(y),
-          gpp = mean(gpp),
-          pptMean = mean(pptMean),
-          lag = 0:5,
-          across(ends_with("resids"),
-                 function(res) {acf(res, plot = F, lag.max = 5)$acf}))
-
-# Histogram and map of autocorrelation
-histograms <- list(length = 5)
-
-for (i in 1:5) {
-  hist <- mod_ac %>%
-    filter(lag == i) %>%
-    ggplot(aes(x = mod2_k12_resids)) +
-    geom_histogram(bins = 100, fill = "lightgreen", colour = "grey") +
-    geom_vline(xintercept = 0, colour = "red")
-  
-  histograms[[i]] <- hist
-}
-
-mod_ac_rast <- mod_ac %>%
-  select(x, y, mod2_k12_resids) %>%
-  rast(crs = "EPSG:4326")
-
-tm_shape(mod_ac_rast) + tm_raster(style = "cont", palette = "RdBu") +
-  tm_shape(africa) + tm_borders()
-
-tm_shape(mod_ac_rast > 0.45) + tm_raster()
+# 
+# ggsave(here("results", "figures", "mod1_diag_grass.png"), mod_diag_grass,
+#        width = 26.5, height = 22, units = "cm", dpi = 200)
+# ggsave(here("results", "figures", "mod_diag_shrub.png"), mod_diag_shrub,
+#        width = 26.5, height = 22, units = "cm", dpi = 200)
+# ggsave(here("results", "figures", "mod_diag_savanna.png"), mod_diag_savanna,
+#        width = 26.5, height = 22, units = "cm", dpi = 200)
 
 ```
 
-
-
-
-
-``` {r interaction_mods}
-
-cl <- makeCluster(nc)
-
-tic()
-mod3 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
-              s(pptAnomaly, k = 8, bs = "ts") +
-              # ti(pptMean, pptAnomaly, k = c(12,12), bs = "ts") +
-              s(pptMeanDayAnomaly, k = 8, bs = "ts") +
-              # ti(pptAnomaly, pptMeanDayAnomaly, k = c(12,12), bs = "ts") +
-              s(pptIntensity, k = 8, bs = "ts") +
-              s(pptGt95Pc, k = 8, bs = "ts") +
-              s(pptUgi, k = 8, bs = "ts") +
-              s(seasonLength, k = 8, bs = "ts") +
-              s(seasonOnsetAnomaly, k = 8) +
-              s(tMean, k = 8, bs = "ts") +
-              s(fire, k = 8, bs = "ts") +
-              s(sand, k = 8, bs = "ts") +
-              s(soilN, k = 8, bs = "ts") +
-              ti(x, y, k = c(12, 12), bs = "ts") +
-              ti(year, k = 8, bs = "ts") +
-              ti(x, y, year, d = c(2,1), bs = c("ts", "ts"), k = c(6,6)),
-            data = df_model_sample,
-            method = "REML",
-            family = Gamma(link = "log"),
-            select = TRUE,
-            samfrac = 0.1,
-            cluster = cl)
-toc()
-
-# # Save/load model results
-
-write_rds(mod3, here("data", "processed", "models", "mod3_annual.rds"))
-
-
-# With more interactions
-
-tic()
-mod3_int <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
-              s(pptAnomaly, k = 8, bs = "ts") +
-              ti(pptMean, pptAnomaly, k = c(6,6), bs = "ts") +
-              s(pptMeanDayAnomaly, k = 8, bs = "ts") +
-              ti(pptAnomaly, pptMeanDayAnomaly, k = c(6,6), bs = "ts") +
-              s(pptIntensity, k = 8, bs = "ts") +
-              s(pptGt95Pc, k = 8, bs = "ts") +
-              s(pptUgi, k = 8, bs = "ts") +
-              s(seasonLength, k = 8, bs = "ts") +
-              s(seasonOnsetAnomaly, k = 8) +
-              s(tMean, k = 8, bs = "ts") +
-              s(fire, k = 8, bs = "ts") +
-              s(sand, k = 8, bs = "ts") +
-              s(soilN, k = 8, bs = "ts") +
-              ti(x, y, k = c(12, 12), bs = "ts") +
-              ti(year, k = 8, bs = "ts") +
-              ti(x, y, year, d = c(2,1), bs = c("ts", "ts"), k = c(6,6)),
-            data = df_model_sample,
-            method = "REML",
-            family = Gamma(link = "log"),
-            select = TRUE,
-            samfrac = 0.1,
-            cluster = cl)
-toc()
-
-# # Save/load model results
-
-write_rds(mod3_int, here("data", "processed", "models", "mod3_annual_int.rds"))
-
-```
 
 
 # Plot GAM results
 
 ```{r term_plots}
 
-df_model <- read_csv(here("data", "processed", "csv", "df_model_annual.csv"))
-df_model_sample <- read_csv(here("data", "processed", "csv", "df_model_annual_sample.csv"))
-study_area_mask <- rast(here("data", "processed", "raster", "study_area_mask.tif"))
+# # df_model <- read_csv(here("data", "processed", "csv", "df_model_annual.csv"))
+# df_model_sample <- read_csv(here("data", "processed", "csv", "df_model_annual_sample.csv"))
+# study_area_mask <- rast(here("data", "processed", "raster", "study_area_mask.tif"))
+
+
+df_model_sample$cover[df_model_sample$cover == "Open_shrublands"] <- "Shrublands"
+df_model_sample$cover[df_model_sample$cover == "Open_savannas"] <- "Savannas"
+df_model_sample_clean <- df_model_sample %>%
+  filter(cover != "Woody_savannas") %>%
+  mutate(cover = ordered(cover, levels = c("Grasslands", "Shrublands", "Savannas"))) %>%
+  mutate(pptMean = pptMean * 1000)
 
 # Set plot output directory
 
@@ -488,40 +391,30 @@ theme_set(theme_classic())
 
 # Extract smooth shapes as data frame using gratia
 
-mod1_smooths <- gratia::smooth_estimates(mod1, unconditional = TRUE) %>%
-  mutate(Model = "Non-spatial",
+grass_smooths <- gratia::smooth_estimates(mod2_k12_grass, unconditional = TRUE) %>%
+  mutate(cover = "Grasslands",
          ci_low= exp(est - se * 1.96),
          ci_high = exp(est + se * 1.96),
          est = exp(est),
          pptMean = pptMean * 1000)
-mod2_k8_smooths <- gratia::smooth_estimates(mod2_k8, unconditional = TRUE) %>%
-  mutate(Model = "Spatial - low\ncomplexity",
+shrub_smooths <- gratia::smooth_estimates(mod2_k12_shrub, unconditional = TRUE) %>%
+  mutate(cover = "Shrublands",
          ci_low= exp(est - se * 1.96),
          ci_high = exp(est + se * 1.96),
          est = exp(est),
-         pptMean = pptMean * 1000) %>%
-  select(-c(x,y))
-mod2_k12_smooths <- gratia::smooth_estimates(mod2_k12, unconditional = TRUE) %>%
-  mutate(Model = "Spatial - medium\ncomplexity",
+         pptMean = pptMean * 1000)
+savanna_smooths <- gratia::smooth_estimates(mod2_k12_savanna, unconditional = TRUE) %>%
+  mutate(cover = "Savannas",
          ci_low= exp(est - se * 1.96),
          ci_high = exp(est + se * 1.96),
          est = exp(est),
-         pptMean = pptMean * 1000) %>%
-  select(-c(x,y))
-mod2_k16_smooths <- gratia::smooth_estimates(mod2_k16, unconditional = TRUE) %>%
-  mutate(Model = "Spatial - high\ncomplexity",
-         ci_low= exp(est - se * 1.96),
-         ci_high = exp(est + se * 1.96),
-         est = exp(est),
-         pptMean = pptMean * 1000) %>%
-  select(-c(x,y))
-
+         pptMean = pptMean * 1000)
 
 # Combine models into single data frame
-mod_smooths <- bind_rows(mod1_smooths,
-                         mod2_k8_smooths,
-                         mod2_k12_smooths,
-                         mod2_k16_smooths) %>%
+mod_smooths <- bind_rows(grass_smooths,
+                         shrub_smooths,
+                         savanna_smooths
+                         ) %>%
   filter(type == "TPRS (shrink)")
 
 # Read in data labels lookup table
@@ -530,11 +423,15 @@ var_labels <- read_csv(here("data", "raw", "csv", "var_labels_annual.csv"))
 
 var_list <- var_labels$vars
 
-plots <- list(length = length(var_list))
+signif_vars <- c("pptMean", "pptAnomaly", "tMean", "pptIntensity", "soilN", "sand")
+
+plots <- list(length = length(signif_vars))
+
+palette <- "Set2"
 
 # Generate plots
 
-plots <- map(var_list, function(var) {
+plots <- map(signif_vars, function(var) {
   
   # Labels for each facet window
   # Create expressions for those with superscript/subscripts
@@ -544,53 +441,81 @@ plots <- map(var_list, function(var) {
   }
   
   # Plot data density plot
-  data_df <- df_model_sample %>%
-    select(x, y, all_of(var)) %>%
-    rename(z = 3)
+  data_df <- df_model_sample_clean %>%
+    select(x, y, cover, all_of(var)) %>%
+    rename(z = 4)
   
   density <- ggplot(data_df, aes(x = z)) +
-    geom_density(colour = "grey70", fill = "grey90", alpha = 0.6) +
+    geom_density(aes(colour = cover, fill = cover),
+                 position = "identity",
+                 alpha = 0.2, 
+                 linewidth = 0.75,
+                 show.legend = FALSE) +
+    scale_colour_brewer(palette = palette) +
+    scale_fill_brewer(palette = palette) +
     theme_void()
   
   # Plot model smooths
   smooth_df <- mod_smooths %>%
-    select(smooth, type, est, se, ci_low, ci_high, Model,
+    select(smooth, type, est, se, ci_low, ci_high, cover,
              all_of(var)) %>%
-    mutate(Model = factor(Model, levels = c("Non-spatial",
-                                            "Spatial - low\ncomplexity",
-                                            "Spatial - medium\ncomplexity",
-                                            "Spatial - high\ncomplexity")),
-           Model = ordered(Model)) %>%
+    mutate(cover = ordered(cover, levels = c("Grasslands",
+                                            "Shrublands",
+                                            "Savannas"
+                                            ))) %>%
     rename(var0 = 8) %>%
     drop_na()
   
-  # Calculate bins
-  diff <- smooth_df$var0[2] - smooth_df$var0[1]
+  # Calculate alpha values based on point density
+  
+  calc_bins <- function(df, col_to_bin, n = 100) {
+    col <- df[[col_to_bin]]
+    df_bins <- df %>%
+      mutate(bin = cut_interval(col, n = n))
+    df_bins_count <- count(df_bins, bin, .drop = FALSE)
+    
+    df_bins_count
+  }
+  
+  # Moving average function
+  ma <- function(x, n = 5){stats::filter(x, rep(1 / n, n), sides = 2)}
 
   df_bins <- data_df %>%
-    mutate(bin = cut_interval(z, length = diff)) %>%
-    count(bin, .drop = FALSE)
-
-  alpha_list <- pmin(1, (df_bins$n / (nrow(df_model) / 100))) %>%
-    rep(4)
-  smooth_df$alpha <- alpha_list[1:400]
+    group_by(cover) %>%
+    nest() %>%
+    mutate(data_bin = map(data, calc_bins, col_to_bin = "z")) %>%
+    select(-data) %>%
+    unnest(data_bin) %>%
+    arrange(cover) %>%
+    ungroup()
   
+  df_bins_alpha <- df_bins %>%
+    # group_by(cover) %>%
+    mutate(log_n_frac = log((n + 1) / sum(n), base = 10)) %>%
+    mutate(alpha = pmin(1, (log_n_frac - min(log_n_frac)) / (-3 - min(log_n_frac)))) %>%
+    mutate(alpha_ma = ma(alpha)) %>%
+    mutate(alpha_ma = coalesce(alpha_ma, alpha)) %>%
+    ungroup()
+  
+  # Assign alpha values to curves
+  smooth_df$alpha <- df_bins_alpha$alpha_ma
   
   plot <- ggplot(smooth_df, aes(x = var0, y = est,
                                 alpha = alpha
                                 )) +
     geom_hline(yintercept = 1, colour = "grey80", linetype = "longdash") +
-    # geom_ribbon(aes(ymin = ci_low, ymax = ci_high,
-    # fill = Model)) +
-    geom_line(aes(colour = Model), lwd = 0.6) +
-    scale_colour_manual(values = c("#888888", "#41ab5d", "#238443","#004529")) +
-    scale_linetype_manual(values = c("longdash", "solid", "solid", "solid")) +
-    scale_alpha_continuous(range = c(0.3, 1)) +
-    # scale_fill_manual(values = c("#DDDDDD", "#daffd3", "#51c384","#208d4c")) +
+    # geom_ribbon(aes(ymin = ci_low, ymax = ci_high, fill = cover), alpha = 0.3) +
+    geom_line(aes(colour = cover), lwd = 0.75) +
+    scale_colour_brewer(palette = palette) +
+    scale_alpha_continuous(range = c(0, 1)) +
+    # scale_fill_brewer(palette = palette) +
     guides(alpha = "none") +
-    ylim(0, 2.5) +
+    coord_cartesian(ylim=c(0, 2.5)) +
     labs(x = x_label,
-         y = "Partial effect")
+         y = "Partial effect",
+         colour = "Land cover",
+         # fill = "Land cover"
+         )
   
   if(var_labels$min_0[var_labels$vars == var] == 1) {
     plot <- plot + scale_x_continuous(limits = c(0, max(smooth_df$var0)))
@@ -603,16 +528,16 @@ plots <- map(var_list, function(var) {
   
   # Arrange into small multiples with patchwork package 
   density + plot +
-    plot_layout(ncol = 1, nrow = 2, widths = 4, heights = c(1, 4))
+    plot_layout(ncol = 1, nrow = 2, widths = 4, heights = c(1.5, 4))
 })
 
 # Create main GAM figure
-gam_plot <- ggarrange(plotlist = plots, ncol = 3, nrow = 4, common.legend = TRUE)
+gam_plot <- ggarrange(plotlist = plots, ncol = 3, nrow = 2, common.legend = TRUE)
 
 # Save spatial term map
-ggsave(here(plot_dir, "annual_gam_plot_exp_alpha.jpg"),
+ggsave(here(plot_dir, "annual_gam_plot_exp_by_lc_signif_mod2_k12_alpha.jpg"),
        plot = gam_plot,
-       width = 20, height = 30, units = "cm", dpi = 300)
+       width = 20, height = 18, units = "cm", dpi = 300)
 
 # # Create map of spatial term for low smoothing spatial model
 # 
@@ -662,29 +587,10 @@ ggsave(here(plot_dir, "annual_gam_plot_exp_alpha.jpg"),
 ```
 
 
-The results are very similar to the multi-annual, except for two aspects:
-1. The annual precipitation anomaly is clearly important, although it seems
-linear (on a log scale), which suggests a concave-up relationship overall.
-2. The ranges of the covariates tend to be larger (because they are annual
-values rather than means), such that the bulk of the data tends to be squeezed
-into a very small range of the x-axis. This presumably means it's harder to
-judge/detect any effect of these covariates. Do I need to centre and transform
-variables to make them meaningful for the GAM?
-
-The very similar results suggest that the model is still being driven by spatial
-gradients in covariates rather than differences over time. Perhaps I need to
-separately build a model that looks only at anomalies in GPP (fractional or
-absolute) as a function of other anomalies? I could focus on the variables that
-seemed to have substantive effects in the mean analysis for starters. The
-challenge of GAMs is that it's very difficult to compare the magnitude of the
-effect between the spatial model and the temporal model, since the functions
-are composite polynomials and since the model involves a log link that
-means a unit increase in a covariate doesn't have a simple interpretation in
-terms of the response.
 
 Model diagnostic and residual plots
 
-```{r diag_plots}
+```{r diag_plots, eval = FALSE}
 
 # Model diagnostic plots
 
@@ -730,13 +636,13 @@ Repeat model for separate MAP bins:
 df_model_sample <- read_csv(here("data", "processed", "csv", "df_model_annual_sample.csv"))
 
 df_model_bins <- df_model_sample %>%
+  filter(cover != "Woody_savannas") %>%
   mutate(map_bin = cut_width(pptMean, width = 0.4, boundary = 0)) %>%
-  group_by(map_bin) %>%
+  group_by(cover, map_bin) %>%
   nest() %>%
-  ungroup()
-
-# Cut to only first three bins
-df_model_bins <- df_model_bins[1:3,]
+  mutate(frac = map(data, nrow) %>% unlist() / nrow(df_model_sample)) %>%
+  filter(frac > 0.01) %>%
+  unnest(data)
 
 fit_gam <- function(data, spatial = FALSE, spatial_k = 12) {
   
@@ -805,35 +711,16 @@ cl <- makeCluster(nc)
 
 tic()
 mod2_k12_binned <- df_model_bins %>%
+  group_by(cover, map_bin) %>%
+  nest() %>%
   mutate(mod2_k12 = map(data, fit_gam, spatial = TRUE, spatial_k = 12)) %>%
   select(-data)
 toc()
-write_rds(mod2_k12_binned, here("data", "processed", "models", "mod2_k12_binned_annual.rds"))
+write_rds(mod2_k12_binned, here("data", "processed", "models", "mod2_k12_binned_by_lc_subsets.rds"))
 
-tic()
-mod2_k16_binned <- df_model_bins %>%
-  mutate(mod2_k16 = map(data, fit_gam, spatial = TRUE, spatial_k = 16)) %>%
-  select(-data)
-toc()
-write_rds(mod2_k16_binned, here("data", "processed", "models", "mod2_k16_binned_annual.rds"))
+beepr::beep(3)
 
 stopCluster(cl)
-
-mod1_binned <- read_rds(here("data", "processed", "models", "mod1_binned_annual.rds"))
-mod2_k8_binned <- read_rds(here("data", "processed", "models", "mod2_k8_binned_annual.rds"))
-mod2_k12_binned <- read_rds(here("data", "processed", "models", "mod2_k12_binned_annual.rds"))
-mod2_k16_binned <- read_rds(here("data", "processed", "models", "mod2_k16_binned_annual.rds"))
-
-# Join
-models_binned_joined <- df_model_bins %>%
-  left_join(mod1_binned) %>%
-  left_join(mod2_k8_binned) %>%
-  left_join(mod2_k12_binned) %>%
-  left_join(mod2_k16_binned)
-
-
-write_rds(models_binned_joined,
-          here("data", "processed", "models", "binned_models_annual.rds"))
 
 
 ```
@@ -842,11 +729,17 @@ Visualise binned models:
 
 ```{r binned_models_viz}
 
-models_binned <- read_rds(here("data", "processed", "models", "binned_models_annual.rds"))
-
-# plot_gam <- function(gam) {
-#   plot(gam, pages = 3, seWithMean = T, scheme = 2)
-# }
+# Load models and generate smooths
+# (Done in one step to avoid issues with keeping large models in memory)
+mod2_k12_smooths <- read_rds(here("data", "processed", "models", "mod2_k12_binned_by_lc_subsets.rds")) %>%
+  filter(map_bin %in% levels(map_bin)[1:3]) %>%
+  mutate(smooths_df = map(mod2_k12, smooth_estimates, unconditional = TRUE, n = 101)) %>%
+  select(-mod2_k12) %>%
+  unnest(smooths_df) %>%
+  mutate(ci_low = exp(est - se * 1.96),
+         ci_high = exp(est + se * 1.96),
+         est = exp(est),
+         pptMean = pptMean * 1000)
 
 # Set plot output directory
 
@@ -856,117 +749,133 @@ theme_set(theme_classic())
 
 ## Binned GAM partial effect plots
 
-for (i in 1:nrow(models_binned)) {
+signif_vars <- c("pptAnomaly", "pptIntensity", "tMean", "soilN", "sand")
+
+smooths_binned_pivot <- mod2_k12_smooths %>%
+  select(cover, map_bin,
+         all_of(signif_vars),
+         est, se, ci_low, ci_high) %>%
+  pivot_longer(cols = all_of(signif_vars),
+               names_to = "var", values_to = "value") %>%
+  drop_na()
+
+
+# Label lookup tables
+
+var_labels <- c(
+    "'Precipitation anomaly'",
+    "Intensity~(mm~d^-1)",
+    "'Mean air temperature (°C)'",
+    "Soil~nitrogen~(g~kg^-2)",
+    "'Soil sand fraction'"
+  )
+
+bin_labels <- c("'0-400'~mm~yr^-1",
+                "'400-800'~mm~yr^-1",
+                "'800-1,200'~mm~yr^-1")
+
+var_labels_df <- tibble(
+  var = signif_vars,
+  var_label = ordered(var_labels, levels = var_labels)
+)
+
+bin_labels_df <- tibble(
+  map_bin = levels(smooths_binned_pivot$map_bin)[1:3],
+  bin_label = ordered(bin_labels, levels = bin_labels)
+)
+
+cover_labels <- c("Grasslands", "Shrublands", "Savannas")
+
+cover_labels_df <- tibble(
+  cover = c("Grasslands", "Open_shrublands", "Open_savannas"),
+  cover_label = ordered(cover_labels, levels = cover_labels)
+)
+
+smooths_binned_labeled <- smooths_binned_pivot %>%
+  left_join(var_labels_df) %>%
+  left_join(bin_labels_df) %>%
+  left_join(cover_labels_df)
+
+# Calculate alpha values based on point density
+
+calc_bins <- function(df, col_to_bin, n = 100) {
+  col <- df[[col_to_bin]]
+  df_bins <- df %>%
+    mutate(bin = cut_interval(col, n = n))
+  df_bins_count <- count(df_bins, bin, .drop = FALSE)
   
-  # Extract smooth shapes as data frame using gratia
-  
-  mod1_smooths <- gratia::smooth_estimates(models_binned$mod1[[i]], unconditional = TRUE) %>%
-    mutate(Model = "Non-spatial",
-           ci_low= exp(est - se * 1.96),
-           ci_high = exp(est + se * 1.96),
-           est = exp(est),
-           pptMean = pptMean * 1000)
-  mod2_k8_smooths <- gratia::smooth_estimates(models_binned$mod2_k8[[i]], unconditional = TRUE) %>%
-    mutate(Model = "Spatial - low\ncomplexity",
-           ci_low= exp(est - se * 1.96),
-           ci_high = exp(est + se * 1.96),
-           est = exp(est),
-           pptMean = pptMean * 1000) %>%
-    select(-c(x,y))
-  mod2_k12_smooths <- gratia::smooth_estimates(models_binned$mod2_k12[[i]], unconditional = TRUE) %>%
-    mutate(Model = "Spatial - medium\ncomplexity",
-           ci_low= exp(est - se * 1.96),
-           ci_high = exp(est + se * 1.96),
-           est = exp(est),
-           pptMean = pptMean * 1000) %>%
-    select(-c(x,y))
-  mod2_k16_smooths <- gratia::smooth_estimates(models_binned$mod2_k16[[i]], unconditional = TRUE) %>%
-    mutate(Model = "Spatial - high\ncomplexity",
-           ci_low= exp(est - se * 1.96),
-           ci_high = exp(est + se * 1.96),
-           est = exp(est),
-           pptMean = pptMean * 1000) %>%
-    select(-c(x,y))
-  
-  # Combine models into single data frame
-  mod_smooths <- bind_rows(mod1_smooths,
-                           mod2_k8_smooths,
-                           mod2_k12_smooths,
-                           mod2_k16_smooths) %>%
-    filter(type == "TPRS (shrink)")
-  
-  # Read in data labels lookup table
-  
-  var_labels <- read_csv(here("data", "raw", "csv", "var_labels_annual.csv"))
-  
-  var_list <- var_labels$vars
-  
-  plots <- list(length = length(var_list))
-  
-  # Generate plots
-  
-  plots <- map(var_list, function(var) {
-    
-    # Labels for each facet window
-    # Create expressions for those with superscript/subscripts
-    x_label <- var_labels$label[var_labels$vars == var]
-    if (var_labels$parse[var_labels$vars == var]) {
-      x_label <- parse(text = x_label)
-    }
-  
-    # Plot data density plot
-    data_df <- models_binned$data[[i]] %>%
-      select(x, y, all_of(var)) %>%
-      rename(z = 3)
-    
-    density <- ggplot(data_df, aes(x = z)) +
-      geom_density(colour = "grey70", fill = "grey90", alpha = 0.6) +
-      theme_void()
-    density
-    
-    # Plot model smooths
-    smooth_df <- mod_smooths %>%
-      select(smooth, type, est, se, ci_low, ci_high, Model,
-               all_of(var)) %>%
-      mutate(Model = factor(Model, levels = c("Non-spatial",
-                                              "Spatial - low\ncomplexity",
-                                              "Spatial - medium\ncomplexity",
-                                              "Spatial - high\ncomplexity")),
-             Model = ordered(Model)) %>%
-      rename(var0 = 8) %>%
-      drop_na()
-    
-    plot <- ggplot(smooth_df, aes(x = var0, y = est)) +
-      geom_hline(yintercept = 1, colour = "grey80") +
-      geom_ribbon(aes(ymin = ci_low, ymax = ci_high,
-                      fill = Model), alpha = 0.7) +
-      geom_line(aes(colour = Model, linetype = Model), alpha = 0.8, lwd = 0.6) +
-      scale_colour_manual(values = c("#AAAAAA", "#bae4b3", "#31a354","#006d2c")) +
-      scale_linetype_manual(values = c("longdash", "solid", "solid", "solid")) +
-      scale_fill_manual(values = c("#DDDDDD", "#daffd3", "#51c384","#208d4c")) +
-      guides(alpha = "none") +
-      ylim(0, 2.5) +
-      labs(x = x_label,
-           y = "Partial effect")
-    
-      # if(var_labels$min_0[var_labels$vars == var] == 1) {
-      #   plot <- plot + scale_x_continuous(limits = c(0, max(smooth_df$var0)))
-      #   density <- density + scale_x_continuous(limits = c(0, max(smooth_df$var0)))
-      # }
-    
-    # Arrange into small multiples with patchwork package 
-    density + plot +
-        plot_layout(ncol = 1, nrow = 2, widths = 4, heights = c(1, 4))
-    })
-    
-    # Create main GAM figure
-    gam_plot <- ggarrange(plotlist = plots, ncol = 3, nrow = 4, common.legend = TRUE)
-    
-    # Save main GAM figure
-    ggsave(here(plot_dir, paste0("binned_gam_annual_plot_exp_", i, ".jpg")),
-           plot = gam_plot,
-           width = 20, height = 30, units = "cm", dpi = 300)
-  
+  df_bins_count
 }
+
+# Moving average function
+ma <- function(x, n = 11){stats::filter(x, rep(1 / n, n), sides = 2)}
+
+# Calculate alpha based on log of ratio of bin size to dataset size
+calc_alpha <- function(df, col_to_bin = "n", limit = -3) {
+  col <- df[[col_to_bin]]
+  df$log_frac <- log((col + 1) / sum(col), base = 10)
+  df_alpha <- df %>%
+    mutate(alpha = pmin(1, (log_frac - min(log_frac)) / (limit - min(log_frac)))) %>%
+    mutate(alpha_ma = ma(alpha)) %>%
+    mutate(alpha_ma = coalesce(alpha_ma, alpha))
+  
+  df_alpha
+}
+
+binned_data_bins <- df_model_bins %>%
+  select(cover, map_bin, cell, year, all_of(signif_vars)) %>%
+  filter(map_bin %in% levels(map_bin)[1:3]) %>%
+  pivot_longer(cols = all_of(signif_vars)) %>%
+  group_by(cover, map_bin, name) %>%
+  nest() %>%
+  mutate(data = map(data, calc_bins, col_to_bin = "value")) %>%
+  mutate(data = map(data, calc_alpha)) %>%
+  unnest(data)
+# ########
+# ggplot(density_facets_df, aes(x = value, colour = cover, fill = cover)) +
+#     geom_histogram(bins = 100, position = "identity", alpha = 0.3) +
+#     facet_grid(rows = vars(map_bin), cols = vars(name), scales = "free_x") +
+#     theme_classic()
+# ########
+
+# Assign alpha values to curves
+
+smooths_binned_alpha <- smooths_binned_labeled %>%
+  group_by(cover, map_bin, var) %>%
+  slice_head(n = 100) %>%
+  nest(.key = "smooth_data") %>%
+  left_join(binned_data_bins %>% nest(.key = "alpha_data"),
+            by = c("cover", "map_bin", "var" = "name")) %>%
+  mutate(smooth_data = map2(smooth_data, alpha_data, bind_cols)) %>%
+  select(-alpha_data) %>%
+  unnest(smooth_data)
+
+# Generate faceted plot
+palette <- "Set2"
+
+plots_binned <- ggplot(smooths_binned_alpha,
+                       aes(x = value, y = est, colour = cover_label, alpha = alpha)) +
+  geom_line(lwd = 0.75) +
+  # geom_ribbon(aes(ymin = ci_low, ymax = ci_high), lwd = 0.2, alpha = 0.3) +
+  geom_hline(yintercept = 1, colour = "grey80", linetype = "longdash") +
+  scale_colour_brewer(palette = palette) +
+  scale_alpha_continuous(range = c(0.3, 1)) +
+  guides(alpha = "none") +
+  # scale_fill_brewer(palette = palette) +
+  coord_cartesian(ylim = c(0, 2.5)) +
+  labs(x = "Covariate value",
+       y = "Partial effect",
+       colour = "Land cover") +
+  facet_grid(rows = vars(bin_label), cols = vars(var_label),
+             scales = "free_x",
+             labeller = label_parsed) +
+  theme_classic() +
+  theme(panel.background = element_rect(fill = NA, color = "black"),
+        legend.position = "top")
+
+# Save to disk
+ggsave(here("results", "figures", "plot_binned_by_lc_alpha.jpg"),
+       plots_binned,
+       width = 24, height = 16, units = "cm", dpi = 300)
 
 ```
