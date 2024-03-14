@@ -176,8 +176,6 @@ Convert whole raster to data frame and reshape to tidy format
 
 ```{r to_df, include = FALSE}
 
-
-
 df <- as.data.frame(var_stack_all, xy = TRUE, cells = TRUE) %>%
   left_join(igbp_index) %>%
   pivot_longer(cols = starts_with(c("gpp", "ppt", "tMean", "modisBurn", "season")),
@@ -201,7 +199,6 @@ Generate data frames ready for analysis:
 ``` {r model_dfs}
 
 mean_vars <- c("x", "y",
-               "lc",
                "gpp",
                "pptTotal", "pptDryDays", "pptIntensity", "pptGt95Pc", 
                "pptGt10", "pptGt30", "pptUgi", "seasonLength",
@@ -221,9 +218,10 @@ df_multi_annual <- df %>%
   summarise(pptCV = sd(pptTotal, na.rm = TRUE) / mean(pptTotal, na.rm = TRUE),
             pptMeanDaySD = sd(pptMeanDay, na.rm = TRUE),
             seasonOnsetSD = sd(seasonOnsetAnomaly, na.rm = TRUE),
-            across(all_of(mean_vars), mean)) %>%
+            across(all_of(mean_vars), mean),
+            cover = first(cover)) %>%
   ungroup() %>%
-  select(cell, all_of(mean_vars), all_of(sd_vars)) %>%
+  select(cell, cover, all_of(mean_vars), all_of(sd_vars)) %>%
   rename(pptMean = pptTotal)
 
 df_annual <- df %>%
@@ -232,7 +230,7 @@ df_annual <- df %>%
          pptAnomaly = pptTotal / pptMean,
          pptMeanDayAnomaly = pptMeanDay - mean(pptMeanDay, na.rm = TRUE)) %>%
   ungroup() %>%
-  select(cell, all_of(annual_vars))
+  select(cell, cover, all_of(annual_vars))
 
 # Write data frames to disk
 
