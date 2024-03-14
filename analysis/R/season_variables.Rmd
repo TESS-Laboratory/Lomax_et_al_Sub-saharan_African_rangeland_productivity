@@ -27,7 +27,7 @@ Import data:
 
 # Hydrological year dates
 hYear_start <- rast(here("data", "raw", "raster", "season_variables",
-                           "hYearStartMean60.tif"))
+                           "hYearStartMean.tif"))
 
 # Mean season dates - single and double seasons
 
@@ -39,7 +39,7 @@ mean_season_dates_d <- rast(here("data", "raw", "raster", "season_variables",
 # Seasonal rainfall annual dates and anomalies - single seasons
 # Note that annual dates are expressed relative to the hydrological year start
 annual_season_dates_s <- rast(here("data", "raw", "raster", "season_variables",
-                            "annualSeasonDatesSingleHYear60.tif"))
+                            "annualSeasonDatesSingleHYear.tif"))
 
 date_names_s <- c("onset_", "cessation_")
 year_names_s <- as.character(rep(2001:2019, each = 2))
@@ -50,7 +50,7 @@ names(annual_season_dates_s) <- layer_names_s
 
 # Seasonal rainfall dates and anomalies - double seasons
 annual_season_dates_d <- rast(here("data", "raw", "raster", "season_variables",
-                            "annualSeasonDatesDoubleHYear60.tif"))
+                            "annualSeasonDatesDoubleHYear.tif"))
 
 date_names_d <- c("onset1_", "cessation1_", "onset2_", "cessation2_")
 year_names_d <- as.character(rep(2001:2019, each = 4))
@@ -63,7 +63,8 @@ names(annual_season_dates_d) <- layer_names_d
 
 seasonality_ratio <- rast(here("data", "raw", "raster", "season_variables",
                                "seasonalityRatio.tif")) %>%
-  subset("seasonalityRatio")
+  subset("amplitude_ratio") %>%
+  crop(annual_season_dates_s)  # Crop to extent (GEE export issues)
 
 # Africa country boundaries (Natural Earth dataset)
 africa <- st_read(here("data", "raw", "vector", "natural_earth",
