@@ -370,15 +370,17 @@ mod2_k12_savanna <- read_rds(here("data", "processed", "models", "mod2_k12_Open_
 ```{r term_plots}
 
 # # df_model <- read_csv(here("data", "processed", "csv", "df_model_annual.csv"))
-# df_model_sample <- read_csv(here("data", "processed", "csv", "df_model_annual_sample.csv"))
+df_model_sample <- read_csv(here("data", "processed", "csv", "df_model_annual_sample.csv"))
 # study_area_mask <- rast(here("data", "processed", "raster", "study_area_mask.tif"))
 
+cover_list <- c("Grasslands", "Shrublands", "Savannas")
+complexity_list <- c(8, 12)
 
 df_model_sample$cover[df_model_sample$cover == "Open_shrublands"] <- "Shrublands"
 df_model_sample$cover[df_model_sample$cover == "Open_savannas"] <- "Savannas"
 df_model_sample_clean <- df_model_sample %>%
   filter(cover != "Woody_savannas") %>%
-  mutate(cover = ordered(cover, levels = c("Grasslands", "Shrublands", "Savannas"))) %>%
+  mutate(cover = ordered(cover, levels = cover_list)) %>%
   mutate(pptMean = pptMean * 1000)
 
 # Set plot output directory
@@ -387,23 +389,53 @@ plot_dir <- here("results", "figures")
 
 theme_set(theme_classic())
 
+# Variable names and labels
+
+var_labels <- read_csv(here("data", "raw", "csv", "var_labels_annual.csv"))
+
+var_list <- var_labels$vars
+
+signif_vars <- c("pptMean", "pptAnomaly", "tMean", "pptIntensity", "soilN", "sand")
+
 ## Main GAM partial effect plots
 
 # Extract smooth shapes as data frame using gratia
 
-grass_smooths <- gratia::smooth_estimates(mod2_k12_grass, unconditional = TRUE) %>%
+mod_list <- list(mod2_k8_grass, mod2_k12_grass,
+                 mod2_k8_shrub, mod2_k12_shrub,
+                 mod2_k8_savanna, mod2_k12_savanna)
+
+mod_smooths_all <- tibble(cover = rep(cover_list, each = 2),
+                          complexity = rep(complexity_list, 3),
+                          models = mod_list) %>%
+  mutate(smooths = map(models, gratia::smooth_estimates, unconditional = TRUE)) %>%
+  select(-models) %>%
+  unnest(smooths) %>%
+  mutate(ci_low = exp(est - se * 1.96),
+         ci_high = exp(est - se * 1.96),
+         est = exp(est),
+         pptMean = pptMean * 1000)
+
+mod_smooths_summary <- mod_smooths_all %>%
+  select(-by, -x, -y, -year) %>%
+  pivot_longer(cols = all_of(var_list), names_to = "var", values_to = "value") %>%
+  drop_na() %>%
+  group_by(cover, smooth, ) %>%
+  
+
+grass_smooths <- gratia::smooth_estimates(mod2_k8_grass, unconditional = TRUE) %>%
   mutate(cover = "Grasslands",
          ci_low= exp(est - se * 1.96),
          ci_high = exp(est + se * 1.96),
          est = exp(est),
          pptMean = pptMean * 1000)
-shrub_smooths <- gratia::smooth_estimates(mod2_k12_shrub, unconditional = TRUE) %>%
+shrub_smooths <- gratia::smooth_estimates(mod2_k8_shrub, unconditional = TRUE) %>%
   mutate(cover = "Shrublands",
          ci_low= exp(est - se * 1.96),
          ci_high = exp(est + se * 1.96),
          est = exp(est),
          pptMean = pptMean * 1000)
-savanna_smooths <- gratia::smooth_estimates(mod2_k12_savanna, unconditional = TRUE) %>%
+savanna_smooths <- gratia::smooth_estimates(mod2_k8_savanna, unconditional = TRUE) %>%
   mutate(cover = "Savannas",
          ci_low= exp(est - se * 1.96),
          ci_high = exp(est + se * 1.96),
@@ -417,21 +449,13 @@ mod_smooths <- bind_rows(grass_smooths,
                          ) %>%
   filter(type == "TPRS (shrink)")
 
-# Read in data labels lookup table
-
-var_labels <- read_csv(here("data", "raw", "csv", "var_labels_annual.csv"))
-
-var_list <- var_labels$vars
-
-signif_vars <- c("pptMean", "pptAnomaly", "tMean", "pptIntensity", "soilN", "sand")
-
 plots <- list(length = length(signif_vars))
 
 palette <- "Set2"
 
 # Generate plots
 
-plots <- map(signif_vars, function(var) {
+plots <- map(var_list, function(var) {
   
   # Labels for each facet window
   # Create expressions for those with superscript/subscripts
@@ -501,20 +525,20 @@ plots <- map(signif_vars, function(var) {
   smooth_df$alpha <- df_bins_alpha$alpha_ma
   
   plot <- ggplot(smooth_df, aes(x = var0, y = est,
-                                alpha = alpha
+                                # alpha = alpha
                                 )) +
     geom_hline(yintercept = 1, colour = "grey80", linetype = "longdash") +
-    # geom_ribbon(aes(ymin = ci_low, ymax = ci_high, fill = cover), alpha = 0.3) +
+    geom_ribbon(aes(ymin = ci_low, ymax = ci_high, fill = cover), alpha = 0.3) +
     geom_line(aes(colour = cover), lwd = 0.75) +
     scale_colour_brewer(palette = palette) +
-    scale_alpha_continuous(range = c(0, 1)) +
-    # scale_fill_brewer(palette = palette) +
-    guides(alpha = "none") +
+    # scale_alpha_continuous(range = c(0, 1)) +
+    scale_fill_brewer(palette = palette) +
+    # guides(alpha = "none") +
     coord_cartesian(ylim=c(0, 2.5)) +
     labs(x = x_label,
          y = "Partial effect",
          colour = "Land cover",
-         # fill = "Land cover"
+         fill = "Land cover"
          )
   
   if(var_labels$min_0[var_labels$vars == var] == 1) {
@@ -532,12 +556,12 @@ plots <- map(signif_vars, function(var) {
 })
 
 # Create main GAM figure
-gam_plot <- ggarrange(plotlist = plots, ncol = 3, nrow = 2, common.legend = TRUE)
+gam_plot <- ggarrange(plotlist = plots, ncol = 3, nrow = 4, common.legend = TRUE)
 
 # Save spatial term map
-ggsave(here(plot_dir, "annual_gam_plot_exp_by_lc_signif_mod2_k12_alpha.jpg"),
+ggsave(here(plot_dir, "annual_gam_plot_exp_by_lc_all_mod2_k8.jpg"),
        plot = gam_plot,
-       width = 20, height = 18, units = "cm", dpi = 300)
+       width = 20, height = 30, units = "cm", dpi = 300)
 
 # # Create map of spatial term for low smoothing spatial model
 # 
