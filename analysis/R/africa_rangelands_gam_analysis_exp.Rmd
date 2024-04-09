@@ -696,14 +696,42 @@ Visualise binned models:
 
 ```{r binned_models_viz}
 
-models_binned <- read_rds(here("data", "processed", "models", "models_binned_all.rds"))
-df_model <- read_csv(here("data", "processed", "csv", "df_model_multi_annual.csv"))
+# Load models and generate smooths
+# (Done in one step to avoid issues with keeping large models in memory)
+mod_smooths_binned_k8 <- read_rds(here("data", "processed", "models", "mod_binned_k8_lc_subsets_multi.rds")) %>%
+  filter(map_bin %in% levels(map_bin)[1:3]) %>%
+  mutate(smooths_df = map(mod_8, smooth_estimates, unconditional = TRUE, n = 101)) %>%
+  select(-mod_8) %>%
+  unnest(smooths_df) %>%
+  mutate(ci_low = est - se * 1.96,
+         ci_high = est + se * 1.96,
+         pptMean = pptMean * 1000,
+         k = 8)
 
-# Rename bins
+mod_smooths_binned_k12 <- read_rds(here("data", "processed", "models", "mod_binned_k12_lc_subsets_multi.rds")) %>%
+  filter(map_bin %in% levels(map_bin)[1:3]) %>%
+  mutate(smooths_df = map(mod_12, smooth_estimates, unconditional = TRUE, n = 101)) %>%
+  select(-mod_12) %>%
+  unnest(smooths_df) %>%
+  mutate(ci_low = est - se * 1.96,
+         ci_high = est + se * 1.96,
+         pptMean = pptMean * 1000,
+         k = 12)
 
-models_binned$map_bin <- c("'0-400'~mm~yr^-1",
-                           "'400-800'~mm~yr^-1",
-                           "'800-1,200'~mm~yr^-1")
+mod_smooths_binned_k16 <- read_rds(here("data", "processed", "models", "mod_binned_k16_lc_subsets_multi.rds")) %>%
+  filter(map_bin %in% levels(map_bin)[1:3]) %>%
+  mutate(smooths_df = map(mod_16, smooth_estimates, unconditional = TRUE, n = 101)) %>%
+  select(-mod_16) %>%
+  unnest(smooths_df) %>%
+  mutate(ci_low = est - se * 1.96,
+         ci_high = est + se * 1.96,
+         pptMean = pptMean * 1000,
+         k = 16)
+
+# Merge
+
+mod_smooths_binned_all <- bind_rows(mod_smooths_binned_k8, mod_smooths_binned_k12, mod_smooths_binned_k16)
+
 # Set plot output directory
 
 plot_dir <- here("results", "figures")
@@ -712,216 +740,175 @@ theme_set(theme_classic())
 
 ## Binned GAM partial effect plots
 
-# Set min and max values for each variable to be consistent for different bins
-var_labels <- read_csv(here("data", "raw", "csv", "var_labels.csv")) %>%
-    mutate(min = map(vars, function(var) {min(df_model[[var]])}) %>% unlist(),
-           max = map(vars, function(var) {max(df_model[[var]])}) %>% unlist())
-target_vars <- factor(c("pptCV", "pptIntensity", "tMean", "soilN"))
-
-var_labels_target <- filter(var_labels, vars %in% target_vars) %>%
-  mutate(label = c("Interannual~CV", "'Mean air temperature (°C)'",
-                   "Intensity~(mm~d^-1)", "Soil~nitrogen~(g~kg^-1)"),
-         label = ordered(label, levels =
-                           c("Interannual~CV", "Intensity~(mm~d^-1)",
-                            "'Mean air temperature (°C)'", "Soil~nitrogen~(g~kg^-1)")))
-
-# Create tidy data frame of all binned model outcomes
-model_names <- tibble(model_id = colnames(models_binned)[3:6],
-                      model_name = c("Non-spatial",
-                                     "Spatial - low\ncomplexity",
-                                     "Spatial - medium\ncomplexity",
-                                     "Spatial - high\ncomplexity"
-                      )) %>%
-  mutate(model_name = ordered(model_name, levels = model_name)
+signif_vars <- c(
+  "pptCV"
+  # "pptIntensity",
+  # "pptUgi",
+  # "seasonLength",
+  # "seasonOnsetSD",
+  # "pptMeanDaySD"
 )
-                      
-models_binned_tidy <- models_binned %>%
-  pivot_longer(cols = starts_with("mod"), names_to = "model_id", values_to = "model_object") %>%
-  left_join(model_names)
 
-# Generate binned smooth df function
-generate_smooths <- function(model) {
-  gratia::smooth_estimates(model, unconditional = TRUE) %>%
-    mutate(ci_low= exp(est - se * 1.96),
-           ci_high = exp(est + se * 1.96),
-           est = exp(est),
-           pptMean = pptMean * 1000) %>%
-    filter(type == "TPRS (shrink)") %>%
-    select(-type, -by, -smooth)
-}
-
-models_binned_smooths <- models_binned_tidy %>%
-  mutate(smooth_estimates = map(model_object, generate_smooths)) %>%
-  select(-model_object, -data) %>%
-  unnest(smooth_estimates)
-
-# Filter and reorganise_smooths of target vars
-
-exclude_vars <- var_labels$vars[!(var_labels$vars %in% target_vars)]
-
-models_binned_smooths_tidy <- models_binned_smooths %>%
-  select(-all_of(exclude_vars), -x, -y) %>%
-  pivot_longer(all_of(target_vars), names_to = "var", values_to = "var_value") %>%
+smooths_binned_pivot <- mod_smooths_binned_all %>%
+  select(cover, map_bin, k,
+         all_of(signif_vars),
+         est, se, ci_low, ci_high) %>%
+  pivot_longer(cols = all_of(signif_vars),
+               names_to = "var", values_to = "value") %>%
   drop_na()
 
-# Add alpha values to plot
-
-var_diffs <- models_binned_smooths_tidy %>%
-  group_by(map_bin, var) %>%
-  arrange(var, .by_group = TRUE) %>%
-  summarise(diff = first(lead(var_value) - var_value))
-
-# Function to extract binned density values from data frame
-
-density_from_df <- function(df, diff) {
-  df_binned <- df %>%
-    mutate(bin = cut_interval(.[[1]], length = diff)) %>%
-    count(bin, .drop = FALSE)
-  
-  rows <- nrow(df)
-  
-  df_binned$alpha <- pmin(1, (df_binned$n / (rows / 100)))
-  
-  df_binned
-}
-
-df_bins_alpha <- models_binned %>%
-  select(map_bin, data) %>%
-  left_join(var_diffs) %>%
-  mutate(data = map2(data, var, select),
-         bin_alpha = map2(data, diff, density_from_df)) %>%
-  select(-data, -diff)
-
-models_binned_smooths_alpha <- models_binned_smooths_tidy %>%
-  group_by(map_bin, var, model_id, model_name) %>%
-  nest() %>%
-  left_join(df_bins_alpha) %>%
-  mutate(data = map2(data, bin_alpha, function(df, alpha_df) {
-    df$alpha <- alpha_df$alpha; df
-  })) %>%
-  select(-bin_alpha) %>%
-  unnest(data) %>%
+smooths_binned_merged <- smooths_binned_pivot %>%
+  group_by(cover, map_bin, var, value) %>%
+  summarise(est = exp(mean(est)),
+            ci_low = exp(min(ci_low)),
+            ci_high = exp(max(ci_high))) %>%
   ungroup()
 
-smooths_labelled <- models_binned_smooths_alpha %>%
-  left_join(var_labels_target, by = c("var" = "vars"))
+# Label lookup tables
 
-# One big plot?
+var_labels <- c(
+    "'CV of annual precipitation'"
+    # "Intensity~(mm~d^-1)",
+    # "'Unranked Gini index'",
+    # "'Season length'",
+    # "'SD in season onset date (d)'",
+    # "'SD in mean rainfall day (d)'"
+  )
 
-grid_plot <- ggplot(smooths_labelled, aes(x = var_value, y = est, colour = model_name, alpha = alpha)) +
+bin_labels <- c("'0-400'~mm~yr^-1",
+                "'400-800'~mm~yr^-1",
+                "'800-1,200'~mm~yr^-1")
+
+var_labels_df <- tibble(
+  var = signif_vars,
+  var_label = ordered(var_labels, levels = var_labels)
+)
+
+bin_labels_df <- tibble(
+  map_bin = levels(smooths_binned_pivot$map_bin)[1:3],
+  bin_label = ordered(bin_labels, levels = bin_labels)
+)
+
+cover_labels <- c("Shrublands", "Savannas", "Grasslands")
+
+cover_labels_df <- tibble(
+  cover = c("Open_shrublands", "Open_savannas", "Grasslands"),
+  cover_label = ordered(cover_labels, levels = cover_labels)
+)
+
+smooths_binned_labeled <- smooths_binned_merged %>%
+  left_join(var_labels_df) %>%
+  left_join(bin_labels_df) %>%
+  left_join(cover_labels_df)
+
+# # Calculate alpha values based on point density
+# 
+# calc_bins <- function(df, col_to_bin, n = 100) {
+#   col <- df[[col_to_bin]]
+#   df_bins <- df %>%
+#     mutate(bin = cut_interval(col, n = n))
+#   df_bins_count <- count(df_bins, bin, .drop = FALSE)
+#   
+#   df_bins_count
+# }
+
+# # Moving average function
+# ma <- function(x, n = 11){stats::filter(x, rep(1 / n, n), sides = 2)}
+# 
+# # Calculate alpha based on log of ratio of bin size to dataset size
+# calc_alpha <- function(df, col_to_bin = "n", limit = -3) {
+#   col <- df[[col_to_bin]]
+#   df$log_frac <- log((col + 1) / sum(col), base = 10)
+#   df_alpha <- df %>%
+#     mutate(alpha = pmin(1, (log_frac - min(log_frac)) / (limit - min(log_frac)))) %>%
+#     mutate(alpha_ma = ma(alpha)) %>%
+#     mutate(alpha_ma = coalesce(alpha_ma, alpha))
+#   
+#   df_alpha
+# }
+# 
+# binned_data_bins <- df_model_bins %>%
+#   select(cover, map_bin, cell, year, all_of(signif_vars)) %>%
+#   filter(map_bin %in% levels(map_bin)[1:3]) %>%
+#   pivot_longer(cols = all_of(signif_vars)) %>%
+#   group_by(cover, map_bin, name) %>%
+#   nest() %>%
+#   mutate(data = map(data, calc_bins, col_to_bin = "value")) %>%
+#   mutate(data = map(data, calc_alpha)) %>%
+#   unnest(data)
+# ########
+# ggplot(density_facets_df, aes(x = value, colour = cover, fill = cover)) +
+#     geom_histogram(bins = 100, position = "identity", alpha = 0.3) +
+#     facet_grid(rows = vars(map_bin), cols = vars(name), scales = "free_x") +
+#     theme_classic()
+# ########
+
+# Assign alpha values to curves
+
+# smooths_binned_alpha <- smooths_binned_labeled %>%
+#   group_by(cover, map_bin, var) %>%
+#   slice_head(n = 100) %>%
+#   nest(.key = "smooth_data") %>%
+#   left_join(binned_data_bins %>% nest(.key = "alpha_data"),
+#             by = c("cover", "map_bin", "var" = "name")) %>%
+#   mutate(smooth_data = map2(smooth_data, alpha_data, bind_cols)) %>%
+#   select(-alpha_data) %>%
+#   unnest(smooth_data)
+
+# Generate faceted plot
+palette <- "Set2"
+
+plots_binned <- ggplot(smooths_binned_labeled,
+                       aes(x = value, y = est)) +
   geom_hline(yintercept = 1, colour = "grey80", linetype = "longdash") +
-  geom_line(lwd = 0.6) +
-  scale_colour_manual(values = c("#888888", "#41ab5d", "#238443","#004529")) +
-  scale_linetype_manual(values = c("longdash", "solid", "solid", "solid")) +
-  scale_alpha_continuous(range = c(0.2, 1)) +
-  guides(alpha = "none") +
-  ylim(0, 2.5) +
+  geom_line(aes(colour = cover_label), lwd = 0.75) +
+  geom_ribbon(aes(ymin = ci_low, ymax = ci_high, fill = cover_label), alpha = 0.3) +
+  scale_colour_brewer(palette = palette) +
+  # scale_alpha_continuous(range = c(0.3, 1)) +
+  # guides(alpha = "none") +
+  scale_fill_brewer(palette = palette) +
+  coord_cartesian(ylim = c(0.5, 1.5)) +
   labs(x = "Covariate value",
        y = "Partial effect",
-       colour = "Model") +
-  facet_grid(rows = vars(map_bin), cols = vars(label),
+       colour = "Land cover",
+       fill = "Land cover") +
+  facet_grid(rows = vars(bin_label), cols = vars(var_label),
              scales = "free_x",
              labeller = label_parsed) +
   theme_classic() +
   theme(panel.background = element_rect(fill = NA, color = "black"),
         legend.position = "top")
 
-ggsave(here("results", "figures", "binned_gam_plot_facets.png"),
-       grid_plot,
-       width = 20, height = 15, units = "cm", dpi = 300)
+plot_cv_binned <- ggplot(smooths_binned_labeled,
+                       aes(x = value, y = est)) +
+  geom_hline(yintercept = 1, colour = "grey80", linetype = "longdash") +
+  geom_line(aes(colour = cover_label), lwd = 0.75) +
+  geom_ribbon(aes(ymin = ci_low, ymax = ci_high, fill = cover_label), alpha = 0.3) +
+  scale_colour_brewer(palette = palette, direction = -1) +
+  # scale_alpha_continuous(range = c(0.3, 1)) +
+  # guides(alpha = "none") +
 
+  coord_cartesian(ylim = c(0.5, 1.5)) +
+  labs(x = "Annual precipitation CV (%)",
+       y = "Partial effect",
+       colour = "Land cover",
+       fill = "Land cover") +
+  facet_wrap(~bin_label, ncol = 1, nrow = 3,
+             scales = "fixed",
+             labeller = label_parsed) +
+  theme_classic() +
+  theme(panel.background = element_rect(fill = NA, color = "black"),
+        legend.position = "right")
 
-head(smooths_labelled)
+# Save to disk
+ggsave(here("results", "figures", "plot_binned_by_lc_merged_multi_var.jpg"),
+       plots_binned,
+       width = 16, height = 16, units = "cm", dpi = 300)
 
-# # Hmm, I think it's better with ggarrange
-# 
-# plot_configurations <- tibble(map_bin = rep(unique(models_binned_smooths_tidy$map_bin), each = length(target_vars)),
-#                         var = rep(target_vars, 3))
-# 
-# plot_list <- list(length = nrow(plot_configurations))
-# 
-# for (i in seq_len(nrow(plot_configurations))) {
-#   
-#   map_bin_i <- plot_configurations$map_bin[i]
-#   var_i <- plot_configurations$var[i]
-#   
-#   # Labels for each facet window
-#   # Create expressions for those with superscript/subscripts
-#   x_label <- var_labels$label[var_labels$vars == var_i]
-#   if (var_labels$parse[var_labels$vars == var_i]) {
-#     x_label <- parse(text = x_label)
-#   }
-#   
-#   # Set min and max x values
-#   min_x <- var_labels$min[var_labels$vars == var_i]
-#   max_x <- var_labels$max[var_labels$vars == var_i]
-#   
-#   # Plot data density plot
-#   data_df <- models_binned$data[models_binned$map_bin == map_bin_i][[1]] %>%
-#   select(x, y, all_of(var_i)) %>%
-#   rename(z = 3)
-#   
-#   density <- ggplot(data_df, aes(x = z)) +
-#     geom_density(colour = "grey70", fill = "grey90", alpha = 0.6) +
-#     xlim(min_x, max_x) +
-#     theme_void()
-#     
-#   # Plot model smooths
-#   smooth_df <- models_binned_smooths_tidy %>%
-#     filter(map_bin == map_bin_i & var == var_i) %>%
-#     select(map_bin, model_name, est, se, ci_low, ci_high, var, var_value) %>%
-#     mutate(model_name = factor(model_name, levels = c("Non-spatial",
-#                                             "Spatial - low\ncomplexity",
-#                                             "Spatial - medium\ncomplexity",
-#                                             "Spatial - high\ncomplexity")),
-#            model_name = ordered(model_name)) %>%
-#     drop_na()
-# 
-#   # Calculate bins
-#   diff <- smooth_df$var_value[2] - smooth_df$var_value[1]
-# 
-#   df_bins <- data_df %>%
-#     mutate(bin = cut_interval(z, length = diff)) %>%
-#     count(bin, .drop = FALSE)
-# 
-#   alpha_list <- pmin(1, (df_bins$n / (nrow(df_model) / 100))) %>%
-#     rep(4)
-#   smooth_df$alpha <- alpha_list[1:400]
-#   
-#   
-#   plot <- ggplot(smooth_df, aes(x = var_value, y = est,
-#                                 alpha = alpha
-#                                 )) +
-#     geom_hline(yintercept = 1, colour = "grey80", linetype = "longdash") +
-#     # geom_ribbon(aes(ymin = ci_low, ymax = ci_high,
-#     # fill = Model)) +
-#     geom_line(aes(colour = model_name), lwd = 0.6) +
-#     scale_colour_manual(values = c("#888888", "#41ab5d", "#238443","#004529")) +
-#     scale_linetype_manual(values = c("longdash", "solid", "solid", "solid")) +
-#     scale_alpha_continuous(range = c(0.3, 1)) +
-#     # scale_fill_manual(values = c("#DDDDDD", "#daffd3", "#51c384","#208d4c")) +
-#     guides(alpha = "none") +
-#     ylim(0, 2.5) +
-#     xlim(min_x, max_x) +
-#     labs(x = x_label,
-#          y = "Partial effect",
-#          colour = "Model")
-#     
-#     # Arrange into small multiples with patchwork package 
-#     output <- density + plot +
-#         plot_layout(ncol = 1, nrow = 2, widths = 4, heights = c(1, 4))
-#     
-#     plot_list[[i]] <- output
-# }
-# 
-# gam_plot_binned <- ggarrange(plotlist = plot_list,
-#                              ncol = length(target_vars), nrow = 3,
-#                              common.legend = TRUE)
-# 
-# ggsave(here(plot_dir, "binned_gam_plot_grid.png"),
-#         plot = gam_plot_binned,
-#         width = 30, height = 20, units = "cm", dpi = 300)
-
+ggsave(here("results", "figures", "plot_binned_by_lc_cv.jpg"),
+       plot_cv_binned,
+       width = 12, height = 16, units = "cm", dpi = 300)
+  
 
 ```
 
