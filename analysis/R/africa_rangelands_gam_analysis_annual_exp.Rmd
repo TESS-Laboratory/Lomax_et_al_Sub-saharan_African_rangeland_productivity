@@ -49,7 +49,7 @@ plot_dir <- here("results", "figures")
 ggplot2::theme_set(theme_bw())
 
 # Establish number of cores for parallel computing
-nc <- (detectCores() - 2)
+nc <- detectCores() / 4
 
 ```
 
@@ -110,19 +110,19 @@ Calculate correlation matrix for all variables in dataset:
 
 ```{r correlation, eval = FALSE}
 
-ppt_var_names <- c("pptTotal", "pptAnomaly", "pptMeanDayAnomaly", "pptIntensity",
-               "pptGt95Pc", "pptUgi", "seasonLength", "seasonOnsetAnomaly", "pptMean")
-non_ppt_var_names <- c("tMean", "fire", "sand", "clay", "soilN", "soilP")
+ppt_var_names <- c("pptMean", "pptAnomaly", "pptIntensity", "pptDryDays", "pptUgi", 
+                   "pptGt95Pc", "pptGt10", "pptGt30", "seasonLength")
+non_ppt_var_names <- c("sand", "clay", "soilN", "soilP", "tMean", "fire")
 
 cor_matrix <- df %>%
   dplyr::select(gpp, all_of(ppt_var_names), all_of(non_ppt_var_names)) %>%
   cor(method = "spearman", use="pairwise.complete.obs")
 
-# var_names <- c("GPP", "MAP", "CV", "SDII", "dry", "UGi", "PCI", ":F[95]",
-#                ":F['95w']", ":D['10mm']", ":D['30mm']", "season", ":sigma[onset]",
-#                "sand", "clay", "soilN", "soilP", "tMean", "fire")
-# colnames(cor_matrix) <- var_names
-# rownames(cor_matrix) <- var_names
+var_names <- c("GPP", "MAP", "anomaly", "intensity", "dry", "UGi",
+               ":F['95w']", ":D['10mm']", ":D['30mm']", "season",
+               "sand", "clay", "soilN", "soilP", "tMean", "fire")
+colnames(cor_matrix) <- var_names
+rownames(cor_matrix) <- var_names
 
 # Save correlation plot figure to directory
 
@@ -141,7 +141,6 @@ other covariates, leaving the following:
 
 - Mean annual precipitation
 - Precipitation anomaly
-- Precipitaton mean day anomaly
 - Precipitation intensity
 - F95w
 - UGi
@@ -176,7 +175,7 @@ target_vars <- c(
   "gpp",
   "pptTotal", "pptMean", "pptAnomaly",
   "pptIntensity", "pptGt95Pc", "pptUgi",
-  "pptMeanDayAnomaly", "seasonLength", "seasonOnsetAnomaly",
+  "seasonLength",
   "tMean", "fire", "sand", "soilN"
 )
 
@@ -185,8 +184,7 @@ df_model <- df %>%
   filter(cover != "Woody savannas") %>%
   mutate(pptTotal = 0.001 * pptTotal,
          pptMean = 0.001 * pptMean,
-         cover = str_replace(cover, " ", "_")) %>%
-  filter(!is.na(seasonOnsetAnomaly))
+         cover = str_replace(cover, " ", "_"))
 
 # Subset of 10% of rows to reduce model fitting issues
 set.seed(123)
@@ -228,12 +226,10 @@ for (i in cover_classes) {
   tic()
   mod1 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
               s(pptAnomaly, k = 8, bs = "ts") +
-              s(pptMeanDayAnomaly, k = 8, bs = "ts") +
               s(pptIntensity, k = 8, bs = "ts") +
               s(pptGt95Pc, k = 8, bs = "ts") +
               s(pptUgi, k = 8, bs = "ts") +
               s(seasonLength, k = 8, bs = "ts") +
-              s(seasonOnsetAnomaly, k = 8, bs = "ts") +
               s(tMean, k = 8, bs = "ts") +
               s(fire, k = 8, bs = "ts") +
               s(sand, k = 8, bs = "ts") +
@@ -253,12 +249,10 @@ for (i in cover_classes) {
   tic()
   mod2_k8 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
               s(pptAnomaly, k = 8, bs = "ts") +
-              s(pptMeanDayAnomaly, k = 8, bs = "ts") +
               s(pptIntensity, k = 8, bs = "ts") +
               s(pptGt95Pc, k = 8, bs = "ts") +
               s(pptUgi, k = 8, bs = "ts") +
               s(seasonLength, k = 8, bs = "ts") +
-              s(seasonOnsetAnomaly, k = 8, bs = "ts") +
               s(tMean, k = 8, bs = "ts") +
               s(fire, k = 8, bs = "ts") +
               s(sand, k = 8, bs = "ts") +
@@ -279,12 +273,10 @@ for (i in cover_classes) {
   tic()
   mod2_k12 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
               s(pptAnomaly, k = 8, bs = "ts") +
-              s(pptMeanDayAnomaly, k = 8, bs = "ts") +
               s(pptIntensity, k = 8, bs = "ts") +
               s(pptGt95Pc, k = 8, bs = "ts") +
               s(pptUgi, k = 8, bs = "ts") +
               s(seasonLength, k = 8, bs = "ts") +
-              s(seasonOnsetAnomaly, k = 8, bs = "ts") +
               s(tMean, k = 8, bs = "ts") +
               s(fire, k = 8, bs = "ts") +
               s(sand, k = 8, bs = "ts") +
@@ -301,31 +293,29 @@ for (i in cover_classes) {
 
   write_rds(mod2_k12, here("data", "processed", "models", paste0("mod2_k12_", i, "_annual.rds")))
 
-  # message("Fitting model 2k16 for ", i)
-  # tic()
-  # mod2_k16 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
-  #             s(pptAnomaly, k = 8, bs = "ts") +
-  #             s(pptMeanDayAnomaly, k = 8, bs = "ts") +
-  #             s(pptIntensity, k = 8, bs = "ts") +
-  #             s(pptGt95Pc, k = 8, bs = "ts") +
-  #             s(pptUgi, k = 8, bs = "ts") +
-  #             s(seasonLength, k = 8, bs = "ts") +
-  #             s(seasonOnsetAnomaly, k = 8, bs = "ts") +
-  #             s(tMean, k = 8, bs = "ts") +
-  #             s(fire, k = 8, bs = "ts") +
-  #             s(sand, k = 8, bs = "ts") +
-  #             s(soilN, k = 8, bs = "ts") +
-  #             te(x, y, k = c(16, 16), bs = "ts") +
-  #             s(year, k = 8, bs = "ts"),
-  #           data = df_model_class,
-  #           method = "REML",
-  #           family = Gamma(link = "log"),
-  #           select = TRUE,
-  #           samfrac = 0.1,
-  #           cluster = cl)
-  # toc()
+  message("Fitting model 2k16 for ", i)
+  tic()
+  mod2_k16 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
+              s(pptAnomaly, k = 8, bs = "ts") +
+              s(pptIntensity, k = 8, bs = "ts") +
+              s(pptGt95Pc, k = 8, bs = "ts") +
+              s(pptUgi, k = 8, bs = "ts") +
+              s(seasonLength, k = 8, bs = "ts") +
+              s(tMean, k = 8, bs = "ts") +
+              s(fire, k = 8, bs = "ts") +
+              s(sand, k = 8, bs = "ts") +
+              s(soilN, k = 8, bs = "ts") +
+              te(x, y, k = c(16, 16), bs = "ts") +
+              s(year, k = 8, bs = "ts"),
+            data = df_model_class,
+            method = "REML",
+            family = Gamma(link = "log"),
+            select = TRUE,
+            samfrac = 0.1,
+            cluster = cl)
+  toc()
 
-  # write_rds(mod2_k16, here("data", "processed", "models", paste0("mod2_k16", i, "_annual.rds")))
+  write_rds(mod2_k16, here("data", "processed", "models", paste0("mod2_k16", i, "_annual.rds")))
 
 }
 stopCluster(cl)
@@ -673,12 +663,10 @@ fit_gam <- function(data, spatial = FALSE, spatial_k = 12) {
   if (spatial) {
     model <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
                    s(pptAnomaly, k = 8, bs = "ts") +
-                   s(pptMeanDayAnomaly, k = 8, bs = "ts") +
                    s(pptIntensity, k = 8, bs = "ts") +
                    s(pptGt95Pc, k = 8, bs = "ts") +
                    s(pptUgi, k = 8, bs = "ts") +
                    s(seasonLength, k = 8, bs = "ts") +
-                   s(seasonOnsetAnomaly, k = 8, bs = "ts") +
                    s(tMean, k = 8, bs = "ts") +
                    s(fire, k = 8, bs = "ts") +
                    s(sand, k = 8, bs = "ts") +
@@ -694,12 +682,10 @@ fit_gam <- function(data, spatial = FALSE, spatial_k = 12) {
   } else {
     model <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
                    s(pptAnomaly, k = 8, bs = "ts") +
-                   s(pptMeanDayAnomaly, k = 8, bs = "ts") +
                    s(pptIntensity, k = 8, bs = "ts") +
                    s(pptGt95Pc, k = 8, bs = "ts") +
                    s(pptUgi, k = 8, bs = "ts") +
                    s(seasonLength, k = 8, bs = "ts") +
-                   s(seasonOnsetAnomaly, k = 8, bs = "ts") +
                    s(tMean, k = 8, bs = "ts") +
                    s(fire, k = 8, bs = "ts") +
                    s(sand, k = 8, bs = "ts") +
@@ -719,19 +705,19 @@ fit_gam <- function(data, spatial = FALSE, spatial_k = 12) {
 cl <- makeCluster(nc)
 # plan("multisession", workers = nc)
 
-# tic()
-# mod1_binned <- df_model_bins %>%
-#   mutate(mod1 = map(data, fit_gam, spatial = FALSE)) %>%
-#   select(-data)
-# toc()
-# write_rds(mod1_binned, here("data", "processed", "models", "mod1_binned_annual.rds"))
-# 
-# tic()
-# mod2_k8_binned <- df_model_bins %>%
-#   mutate(mod2_k8 = map(data, fit_gam, spatial = TRUE, spatial_k = 8)) %>%
-#   select(-data)
-# toc()
-# write_rds(mod2_k8_binned, here("data", "processed", "models", "mod2_k8_binned_annual.rds"))
+tic()
+mod1_binned <- df_model_bins %>%
+  mutate(mod1 = map(data, fit_gam, spatial = FALSE)) %>%
+  select(-data)
+toc()
+write_rds(mod1_binned, here("data", "processed", "models", "mod1_binned_annual.rds"))
+
+tic()
+mod2_k8_binned <- df_model_bins %>%
+  mutate(mod2_k8 = map(data, fit_gam, spatial = TRUE, spatial_k = 8)) %>%
+  select(-data)
+toc()
+write_rds(mod2_k8_binned, here("data", "processed", "models", "mod2_k8_binned_annual.rds"))
 
 tic()
 mod2_k12_binned <- df_model_bins %>%
