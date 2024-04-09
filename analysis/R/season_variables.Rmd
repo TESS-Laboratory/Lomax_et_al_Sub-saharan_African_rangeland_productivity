@@ -131,7 +131,7 @@ Explore data and identify issues/errors:
 # summary(seasonal_anomalies_d)
 
 # Single season onset dates
-onset_anomaly_s <- season_dates_anomaly_s[[grepl("onset", names(season_dates_anomaly_s))]]
+onset_anomaly_s <- season_dates_anomaly_s[[str_detect(names(season_dates_anomaly_s), "onset")]]
 
 a <- sum(values(onset_anomaly_s < -60) | values(onset_anomaly_s > mean_length_s), na.rm = TRUE)
 b <- sum(!is.na(values(onset_anomaly_s)))
@@ -139,7 +139,7 @@ print("Single season onset")
 a/b
 
 # Double season onset dates
-onset_anomaly_d <- season_dates_anomaly_d[[grepl("onset", names(season_dates_anomaly_d))]]
+onset_anomaly_d <- season_dates_anomaly_d[[str_detect(names(season_dates_anomaly_d), "onset")]]
 
 c <- sum(values(onset_anomaly_d < -60) | values(onset_anomaly_d > mean_length_d), na.rm = TRUE)
 d <- sum(!is.na(values(onset_anomaly_d)))
@@ -147,7 +147,7 @@ print("Double season onset")
 c/d
 
 # Single season cessation dates
-cessation_anomaly_s <- season_dates_anomaly_s[[grepl("cessation", names(season_dates_anomaly_s))]]
+cessation_anomaly_s <- season_dates_anomaly_s[[str_detect(names(season_dates_anomaly_s), "cessation")]]
 
 # summary(cessation_anomaly)
 e <- sum(values(cessation_anomaly_s + mean_length_s < 0) | values(cessation_anomaly_s > 60), na.rm = TRUE)
@@ -156,7 +156,7 @@ print("Single season cessation")
 e/f
 
 # Double season cessation dates
-cessation_anomaly_d <- season_dates_anomaly_d[[grepl("cessation", names(season_dates_anomaly_d))]]
+cessation_anomaly_d <- season_dates_anomaly_d[[str_detect(names(season_dates_anomaly_d), "cessation")]]
 
 # summary(cessation_anomaly)
 g <- sum(values(cessation_anomaly_d + mean_length_d < 0) | values(cessation_anomaly_d > 60), na.rm = TRUE)
