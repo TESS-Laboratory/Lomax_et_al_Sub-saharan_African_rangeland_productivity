@@ -1083,9 +1083,9 @@
     },
     "gratia": {
       "Package": "gratia",
-      "Version": "0.9.0",
+      "Version": "0.8.1",
       "Source": "Repository",
-      "Repository": "RSPM",
+      "Repository": "CRAN",
       "Requirements": [
         "R",
         "cli",
