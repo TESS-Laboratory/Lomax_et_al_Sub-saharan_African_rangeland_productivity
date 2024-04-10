@@ -110,19 +110,19 @@ Calculate correlation matrix for all variables in dataset:
 
 ```{r correlation, eval = FALSE}
 
-ppt_var_names <- c("pptTotal", "pptAnomaly", "pptMeanDayAnomaly", "pptIntensity",
-               "pptGt95Pc", "pptUgi", "seasonLength", "seasonOnsetAnomaly", "pptMean")
-non_ppt_var_names <- c("tMean", "fire", "sand", "clay", "soilN", "soilP")
+ppt_var_names <- c("pptMean", "pptAnomaly", "pptIntensity", "pptDryDays", "pptUgi", 
+                   "pptGt95Pc", "pptGt10", "pptGt30", "seasonLength")
+non_ppt_var_names <- c("sand", "clay", "soilN", "soilP", "tMean", "fire")
 
 cor_matrix <- df %>%
   dplyr::select(gpp, all_of(ppt_var_names), all_of(non_ppt_var_names)) %>%
   cor(method = "spearman", use="pairwise.complete.obs")
 
-# var_names <- c("GPP", "MAP", "CV", "SDII", "dry", "UGi", "PCI", ":F[95]",
-#                ":F['95w']", ":D['10mm']", ":D['30mm']", "season", ":sigma[onset]",
-#                "sand", "clay", "soilN", "soilP", "tMean", "fire")
-# colnames(cor_matrix) <- var_names
-# rownames(cor_matrix) <- var_names
+var_names <- c("GPP", "MAP", "anomaly", "intensity", "dry", "UGi",
+               ":F['95w']", ":D['10mm']", ":D['30mm']", "season",
+               "sand", "clay", "soilN", "soilP", "tMean", "fire")
+colnames(cor_matrix) <- var_names
+rownames(cor_matrix) <- var_names
 
 # Save correlation plot figure to directory
 
@@ -133,6 +133,7 @@ corrplot::corrplot(cor_matrix, method = "number", type = "upper",
                                tl.cex = 3, number.cex = 1.8, cl.cex = 2)
 
 while (!is.null(dev.list()))  dev.off()
+
 
 ```
 
@@ -176,7 +177,7 @@ target_vars <- c(
   "gpp",
   "pptTotal", "pptMean", "pptAnomaly",
   "pptIntensity", "pptGt95Pc", "pptUgi",
-  "pptMeanDayAnomaly", "seasonLength", "seasonOnsetAnomaly",
+  "seasonLength",
   "tMean", "fire", "sand", "soilN"
 )
 
@@ -185,8 +186,7 @@ df_model <- df %>%
   filter(cover != "Woody savannas") %>%
   mutate(pptTotal = 0.001 * pptTotal,
          pptMean = 0.001 * pptMean,
-         cover = str_replace(cover, " ", "_")) %>%
-  filter(!is.na(seasonOnsetAnomaly))
+         cover = str_replace(cover, " ", "_"))
 
 # Subset of 10% of rows to reduce model fitting issues
 set.seed(123)
@@ -228,12 +228,10 @@ for (i in cover_classes) {
   tic()
   mod1 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
               s(pptAnomaly, k = 8, bs = "ts") +
-              s(pptMeanDayAnomaly, k = 8, bs = "ts") +
               s(pptIntensity, k = 8, bs = "ts") +
               s(pptGt95Pc, k = 8, bs = "ts") +
               s(pptUgi, k = 8, bs = "ts") +
               s(seasonLength, k = 8, bs = "ts") +
-              s(seasonOnsetAnomaly, k = 8, bs = "ts") +
               s(tMean, k = 8, bs = "ts") +
               s(fire, k = 8, bs = "ts") +
               s(sand, k = 8, bs = "ts") +
@@ -254,12 +252,10 @@ for (i in cover_classes) {
   tic()
   mod2_k8 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
               s(pptAnomaly, k = 8, bs = "ts") +
-              s(pptMeanDayAnomaly, k = 8, bs = "ts") +
               s(pptIntensity, k = 8, bs = "ts") +
               s(pptGt95Pc, k = 8, bs = "ts") +
               s(pptUgi, k = 8, bs = "ts") +
               s(seasonLength, k = 8, bs = "ts") +
-              s(seasonOnsetAnomaly, k = 8, bs = "ts") +
               s(tMean, k = 8, bs = "ts") +
               s(fire, k = 8, bs = "ts") +
               s(sand, k = 8, bs = "ts") +
@@ -281,12 +277,10 @@ for (i in cover_classes) {
   tic()
   mod2_k12 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
               s(pptAnomaly, k = 8, bs = "ts") +
-              s(pptMeanDayAnomaly, k = 8, bs = "ts") +
               s(pptIntensity, k = 8, bs = "ts") +
               s(pptGt95Pc, k = 8, bs = "ts") +
               s(pptUgi, k = 8, bs = "ts") +
               s(seasonLength, k = 8, bs = "ts") +
-              s(seasonOnsetAnomaly, k = 8, bs = "ts") +
               s(tMean, k = 8, bs = "ts") +
               s(fire, k = 8, bs = "ts") +
               s(sand, k = 8, bs = "ts") +
@@ -308,12 +302,10 @@ for (i in cover_classes) {
   tic()
   mod2_k16 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
               s(pptAnomaly, k = 8, bs = "ts") +
-              s(pptMeanDayAnomaly, k = 8, bs = "ts") +
               s(pptIntensity, k = 8, bs = "ts") +
               s(pptGt95Pc, k = 8, bs = "ts") +
               s(pptUgi, k = 8, bs = "ts") +
               s(seasonLength, k = 8, bs = "ts") +
-              s(seasonOnsetAnomaly, k = 8, bs = "ts") +
               s(tMean, k = 8, bs = "ts") +
               s(fire, k = 8, bs = "ts") +
               s(sand, k = 8, bs = "ts") +
@@ -434,7 +426,7 @@ palette <- "Set2"
 
 # Generate plots
 
-plots <- map(var_list, function(var) {
+plots <- map(signif_vars, function(var) {
   
   # Labels for each facet window
   # Create expressions for those with superscript/subscripts
@@ -529,12 +521,12 @@ plots <- map(var_list, function(var) {
 })
 
 # Create main GAM figure
-gam_plot <- ggarrange(plotlist = plots, ncol = 3, nrow = 4, common.legend = TRUE)
+gam_plot <- ggarrange(plotlist = plots, ncol = 3, nrow = 2, common.legend = TRUE)
 
 # Save spatial term map
-ggsave(here(plot_dir, "annual_gam_plot_exp_by_lc_all_merged.jpg"),
+ggsave(here(plot_dir, "annual_gam_plot_exp_by_lc_signif_merged.jpg"),
        plot = gam_plot,
-       width = 20, height = 30, units = "cm", dpi = 300)
+       width = 20, height = 18, units = "cm", dpi = 300)
 
 # # Create maps of spatial term for medium complexity spatial model
 # 
@@ -645,12 +637,10 @@ fit_gam <- function(data, spatial = FALSE, spatial_k = 12) {
   if (spatial) {
     model <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
                    s(pptAnomaly, k = 8, bs = "ts") +
-                   s(pptMeanDayAnomaly, k = 8, bs = "ts") +
                    s(pptIntensity, k = 8, bs = "ts") +
                    s(pptGt95Pc, k = 8, bs = "ts") +
                    s(pptUgi, k = 8, bs = "ts") +
                    s(seasonLength, k = 8, bs = "ts") +
-                   s(seasonOnsetAnomaly, k = 8, bs = "ts") +
                    s(tMean, k = 8, bs = "ts") +
                    s(fire, k = 8, bs = "ts") +
                    s(sand, k = 8, bs = "ts") +
@@ -667,12 +657,10 @@ fit_gam <- function(data, spatial = FALSE, spatial_k = 12) {
   } else {
     model <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
                    s(pptAnomaly, k = 8, bs = "ts") +
-                   s(pptMeanDayAnomaly, k = 8, bs = "ts") +
                    s(pptIntensity, k = 8, bs = "ts") +
                    s(pptGt95Pc, k = 8, bs = "ts") +
                    s(pptUgi, k = 8, bs = "ts") +
                    s(seasonLength, k = 8, bs = "ts") +
-                   s(seasonOnsetAnomaly, k = 8, bs = "ts") +
                    s(tMean, k = 8, bs = "ts") +
                    s(fire, k = 8, bs = "ts") +
                    s(sand, k = 8, bs = "ts") +
@@ -709,16 +697,6 @@ for (i in k_list) {
   write_rds(mod_binned, here("data", "processed", "models", paste0("mod_binned_k", i, "_lc_subsets.rds")))
   toc()
 }
-
-
-# tic()
-# mod2_k12_binned <- df_model_bins %>%
-#   group_by(cover, map_bin) %>%
-#   nest() %>%
-#   mutate(mod2_k12 = map(data, fit_gam, spatial = TRUE, spatial_k = 12)) %>%
-#   select(-data)
-# toc()
-# write_rds(mod2_k12_binned, here("data", "processed", "models", "mod2_k12_binned_by_lc_subsets.rds"))
 
 stopCluster(cl)
 
