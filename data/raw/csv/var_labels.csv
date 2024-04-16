@@ -6,8 +6,6 @@ pptIntensity,Intensity (mm ~ d^-1),1,1
 pptGt95Pc,F['95w'],1,1
 pptUgi,Unranked Gini index,0,0
 seasonLength,Season length (d),0,0
-seasonOnsetSD,Season onset SD (d),0,0
-pptMeanDaySD,Mean rainfall day SD (d),0,0
 fire,Fire ~ frequency ~ (yr^-1),1,1
 soilN,Soil ~ nitrogen ~ (g ~ kg^-1),1,1
 sand,Soil sand fraction,0,0
