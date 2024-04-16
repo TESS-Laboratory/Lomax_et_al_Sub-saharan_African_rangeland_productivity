@@ -51,7 +51,7 @@ plot_dir <- here("results", "figures")
 ggplot2::theme_set(theme_bw())
 
 # Establish number of cores for parallel computing
-nc <- (detectCores() - 2)
+nc <- (detectCores() / 4)
 
 ```
 
@@ -88,22 +88,15 @@ Variable definitions:
 |-------------|----------|----|--------------|
 |gpp|Gross Primary Productivity|gC m-2 yr-1|PML_V2|
 |-------------|----------|----|--------------|
-|map|Mean annual precipitation|mm yr-1|CHIRPS|
-|cv|Coefficient of variation of MAP|%|CHIRPS|
-|dry_days|Fraction of days per year with < 1mm precipitation|unitless 0-1|CHIRPS|
-|intensity|Mean intensity of rainfall on a rainy day|mm day-1|CHIRPS|
-|pc95|Fraction of daily rainfall above 95th percentile of all days|unitless 0-1|CHIRPS|
-|wet95|Fraction of daily rainfall above 95th percentile of wet days|unitless 0-1|CHIRPS|
-|gt10|Fraction of days per year with >10 mm rainfall|unitless 0-1|CHIRPS|
-|gt20|Fraction of days per year with >20 mm rainfall|unitless 0-1|CHIRPS|
-|gt30|Fraction of days per year with >30 mm rainfall|unitless 0-1|CHIRPS|
-|mean_day_sd|Standard deviation in the mean date of rainfall|days|CHIRPS|
-|ugi|Unranked Gini index of daily precipitation|unitless 0-1|CHIRPS|
-|pci|Precipitation concentration index|unitless 0-1|CHIRPS|
-|-------------|----------|----|
+|pptMean|Mean annual precipitation|mm yr-1|CHIRPS|
+|pptCV|Coefficient of variation of MAP|%|CHIRPS|
+|pptDryDays|Fraction of days per year with < 1mm precipitation|unitless 0-1|CHIRPS|
+|pptIntensity|Mean intensity of rainfall on a rainy day|mm day-1|CHIRPS|
+|pptGt95Pc|Fraction of daily rainfall above 95th percentile of wet days|unitless 0-1|CHIRPS|
+|pptGt10|Fraction of days per year with >10 mm rainfall|unitless 0-1|CHIRPS|
+|pptGt30|Fraction of days per year with >30 mm rainfall|unitless 0-1|CHIRPS|
+|pptUgi|Unranked Gini index of daily precipitation|unitless 0-1|CHIRPS|
 |season|Average rainy season length|days|CHIRPS|
-|season_sd|Standard deviation of rainy season length|days|CHIRPS|
-|onset_sd|Standard deviation of rainy season onset|days|CHIRPS|
 |-------------|----------|----|
 |sand|Soil sand fraction 0-20cm|%|iSDAsoil|
 |clay|Soil clay fraction 0-20cm|%|iSDAsoil|
@@ -111,48 +104,6 @@ Variable definitions:
 |soilP|Soil extractable phosphorus 0-20cm|ppm|iSDAsoil|
 |tMean|Mean annual air temperature at 2m|degC|ERA5-Land|
 |fire|Mean fire frequency 2001-2019|yr-1|MODIS Terra|
-
-Calculate correlation matrix for all variables in dataset:
-
-```{r correlation, eval = FALSE}
-
-cor_matrix = df %>%
-  dplyr::select(-cell, -x, -y, -lc) %>%
-  cor(method = "spearman", use="pairwise.complete.obs")
-
-var_names <- c("GPP", "MAP", "dry", "intensity", ":F['95w']", ":D['10mm']",
-               ":D['30mm']", "UGi", "CV", "Mean Day SD", "Season length", "Onset SD",
-               "tMean", "fire", "sand", "clay", "soilN", "soilP")
-colnames(cor_matrix) <- var_names
-rownames(cor_matrix) <- var_names
-
-# Save correlation plot figure to directory
-
-png(here(plot_dir, "cor_plot.png"),
-     height = 50, width = 50, units = "cm", res = 300)
-
-corrplot::corrplot(cor_matrix, method = "number", type = "upper",
-                               tl.cex = 3, number.cex = 1.8, cl.cex = 2)
-
-while (!is.null(dev.list()))  dev.off()
-
-```
-
-We remove covariates with > 0.7 Spearman's Rank correlation coefficient with
-other covariates, leaving the following:
-
-- MAP
-- CV
-- UGi
-- season
-- season onset SD
-- mean_day_sd
-- intensity
-- F95w
-- soilN
-- sand
-- tMean
-- fire
 
 # GAMs
 
@@ -175,8 +126,7 @@ analysis above.
 target_vars <- c(
   "cover",
   "gpp",
-  "pptMean", "pptIntensity", "pptGt95Pc", "pptUgi", "pptCV",
-  "pptMeanDaySD", "seasonLength", "seasonOnsetSD",
+  "pptMean", "pptIntensity", "pptGt95Pc", "pptUgi", "pptCV", "seasonLength",
   "tMean", "fire", "sand", "soilN"
 )
 
@@ -221,9 +171,7 @@ for (i in cover_classes) {
                 s(pptIntensity, k = 8, bs = "ts") +
                 s(pptGt95Pc, k = 8, bs = "ts") +
                 s(pptUgi, k = 8, bs = "ts") +
-                s(pptMeanDaySD, k = 8, bs = "ts") +
                 s(seasonLength, k = 8, bs = "ts") +
-                s(seasonOnsetSD, k = 8, bs = "ts") +
                 s(tMean, k = 8, bs = "ts") +
                 s(fire, k = 8, bs = "ts") +
                 s(sand, k = 8, bs = "ts") +
@@ -246,9 +194,7 @@ for (i in cover_classes) {
                 s(pptIntensity, k = 8, bs = "ts") +
                 s(pptGt95Pc, k = 8, bs = "ts") +
                 s(pptUgi, k = 8, bs = "ts") +
-                s(pptMeanDaySD, k = 8, bs = "ts") +
                 s(seasonLength, k = 8, bs = "ts") +
-                s(seasonOnsetSD, k = 8, bs = "ts") +
                 s(tMean, k = 8, bs = "ts") +
                 s(fire, k = 8, bs = "ts") +
                 s(sand, k = 8, bs = "ts") +
@@ -271,9 +217,7 @@ for (i in cover_classes) {
                 s(pptIntensity, k = 8, bs = "ts") +
                 s(pptGt95Pc, k = 8, bs = "ts") +
                 s(pptUgi, k = 8, bs = "ts") +
-                s(pptMeanDaySD, k = 8, bs = "ts") +
                 s(seasonLength, k = 8, bs = "ts") +
-                s(seasonOnsetSD, k = 8, bs = "ts") +
                 s(tMean, k = 8, bs = "ts") +
                 s(fire, k = 8, bs = "ts") +
                 s(sand, k = 8, bs = "ts") +
@@ -291,29 +235,27 @@ for (i in cover_classes) {
   
   # Spatial model - high complexity (k = c(16,16) for spatial term)
   
-  # tic()
-  # mod2_k16 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
-  #               s(pptCV, k = 8, bs = "ts") +
-  #               s(pptIntensity, k = 8, bs = "ts") +
-  #               s(pptGt95Pc, k = 8, bs = "ts") +
-  #               s(pptUgi, k = 8, bs = "ts") +
-  #               s(pptMeanDaySD, k = 8, bs = "ts") +
-  #               s(seasonLength, k = 8, bs = "ts") +
-  #               s(seasonOnsetSD, k = 8, bs = "ts") +
-  #               s(tMean, k = 8, bs = "ts") +
-  #               s(fire, k = 8, bs = "ts") +
-  #               s(sand, k = 8, bs = "ts") +
-  #               s(soilN, k = 8, bs = "ts") +
-  #               te(x, y, k = c(16, 16), bs = "ts"),
-  #             data = df_model_class,
-  #             method = "REML",
-  #             family = Gamma(link = "log"),
-  #             select = TRUE,
-  #             samfrac = 0.1,
-  #             cluster = cl)
-  # toc()
-  # 
-  # write_rds(mod2_k16, here("data", "processed", "models", paste0("mod2_k16_", i, ".rds")))
+  tic()
+  mod2_k16 <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
+                s(pptCV, k = 8, bs = "ts") +
+                s(pptIntensity, k = 8, bs = "ts") +
+                s(pptGt95Pc, k = 8, bs = "ts") +
+                s(pptUgi, k = 8, bs = "ts") +
+                s(seasonLength, k = 8, bs = "ts") +
+                s(tMean, k = 8, bs = "ts") +
+                s(fire, k = 8, bs = "ts") +
+                s(sand, k = 8, bs = "ts") +
+                s(soilN, k = 8, bs = "ts") +
+                te(x, y, k = c(16, 16), bs = "ts"),
+              data = df_model_class,
+              method = "REML",
+              family = Gamma(link = "log"),
+              select = TRUE,
+              samfrac = 0.1,
+              cluster = cl)
+  toc()
+
+  write_rds(mod2_k16, here("data", "processed", "models", paste0("mod2_k16_", i, ".rds")))
 
 }
 
@@ -341,7 +283,8 @@ mod1_savanna <- read_rds(here("data", "processed", "models", "mod1_Open_savannas
 mod2_k8_savanna <- read_rds(here("data", "processed", "models", "mod2_k8_Open_savannas.rds"))
 mod2_k12_savanna <- read_rds(here("data", "processed", "models", "mod2_k12_Open_savannas.rds"))
 mod2_k16_savanna <- read_rds(here("data", "processed", "models", "mod2_k16_Open_savannas.rds"))
-# Model 2 results
+
+# Model results
 # 
 # plot(mod1, shade = TRUE, seWithMean = TRUE, scheme = 2,
 #      pages = 3)
@@ -367,7 +310,6 @@ mod2_k16_savanna <- read_rds(here("data", "processed", "models", "mod2_k16_Open_
 ``` {r term_plots, eval = FALSE}
 
 df_model <- read_csv(here("data", "processed", "csv", "df_model_multi_annual.csv"))
-study_area_mask <- rast(here("data", "processed", "raster", "study_area_mask.tif"))
 
 cover_list <- c("Shrublands", "Savannas", "Grasslands")
 complexity_list <- c(8, 12, 16)
@@ -410,7 +352,7 @@ var_labels <- read_csv(here("data", "raw", "csv", "var_labels.csv"))
 
 var_list <- var_labels$vars
 
-target_list <- c("pptMean", "pptCV")
+target_list <- c("pptMean", "pptCV", "tMean", "pptIntensity", "soilN", "sand")
 
 # Combine smooths from key models
 mod_smooths_summary <- mod_smooths_all %>%
@@ -427,7 +369,7 @@ mod_smooths_summary <- mod_smooths_all %>%
 
 palette <- "Set2"
 
-plots <- map(var_list, function(var) {
+plots <- map(target_list, function(var) {
   
   # Labels for each facet window
   # Create expressions for those with superscript/subscripts
@@ -456,19 +398,18 @@ plots <- map(var_list, function(var) {
     filter(variable == var) %>%
     mutate(cover = ordered(cover, levels = cover_list))
   
-  plot <- ggplot(smooth_df, aes(x = value, y = est,
-                                # alpha = alpha
-                                )) +
+  plot <- ggplot(smooth_df, aes(x = value, y = est)) +
     geom_hline(yintercept = 1, colour = "grey80", linetype = "longdash") +
     geom_ribbon(aes(ymin = ci_low, ymax = ci_high, fill = cover), alpha = 0.3) +
     geom_line(aes(colour = cover), lwd = 0.75) +
-    scale_colour_brewer(palette = palette) +
-    # scale_alpha_continuous(range = c(0.3, 1)) +
-    scale_fill_brewer(palette = palette) +
-    # guides(alpha = "none") +
-    ylim(0, 2.5) +
+    scale_colour_brewer(palette = palette, direction = -1) +
+    scale_fill_brewer(palette = palette, direction = -1) +
+    coord_cartesian(ylim=c(0, 2.5)) +
     labs(x = x_label,
-         y = "Partial effect")
+         y = "Partial effect",
+         colour = "Land cover",
+         fill = "Land cover"
+         )
   
   if(var_labels$min_0[var_labels$vars == var] == 1) {
     plot <- plot + scale_x_continuous(limits = c(0, max(smooth_df$value)))
@@ -480,60 +421,12 @@ plots <- map(var_list, function(var) {
 })
 
 # Create main GAM figure
-gam_plot <- ggarrange(plotlist = plots, ncol = 3, nrow = 4, common.legend = TRUE)
+gam_plot <- ggarrange(plotlist = plots, ncol = 3, nrow = 2, common.legend = TRUE)
 
 # Save main GAM figure
-ggsave(here(plot_dir, "main_gam_plot_all_merged.jpg"),
+ggsave(here(plot_dir, "gam_plot_signif_multi_annual.jpg"),
        plot = gam_plot,
-       width = 20, height = 30, units = "cm", dpi = 300)
-
-# Create map of spatial term for high complexity spatial model
-
-mod2_spatial_smooth <- gratia::smooth_estimates(
-  mod2_k16,
-  n = 300,
-  smooth = "te(x,y)",
-  dist = 0.025) %>%
-  mutate(ci_low= est - se * 1.96,
-         ci_high = est + se * 1.96,
-         est = exp(est),
-         ci_low = exp(ci_low),
-         ci_high = exp(ci_high))
-
-spatial_rast <- mod2_spatial_smooth %>%
-  select(x, y, est) %>%
-  as.data.frame() %>%
-  rast(crs = "epsg:4326") %>%
-  mask(africa_vct) %>%
-  crop(study_area_mask)
-
-spatial_plot_mask <- study_area_mask %>%
-  crop(spatial_rast)
-
-africa_basemap <- tm_shape(africa) + tm_borders() +
-  tm_layout(legend.position = c("left", "bottom"), legend.text.size = 0.8,
-            legend.title.size = 1,
-            legend.bg.color = "white", legend.bg.alpha = 0,
-            legend.height = -0.4) +
-  tm_graticules(x = c(-15,0,15,30,45), y = c(-30,-15,0,15,30), col = "grey90", alpha = 0.6, labels.size = 0.6)
-
-# Create additional mask raster to overlay on excluded regions
-outside_sa <- mask(study_area_mask, study_area_mask, maskvalues = c(1, NA))
-
-sa_basemap_2 <- tm_shape(outside_sa) +
-  tm_raster(palette = "grey75", legend.show = FALSE)
-
-rast_plot <- tm_shape(spatial_rast) +
-  tm_raster(palette = "RdYlBu", breaks = c(0, 0.5, 1, 1.5, 2), style = "cont", midpoint = 1,
-            title = "Partial effect\nof spatial term",
-            legend.reverse = TRUE) +
-  sa_basemap_2 +
-  africa_basemap
-
-# Save spatial term map
-tmap_save(rast_plot,
-          here(plot_dir, "spatial_term.jpg"),
-          width = 16, height = 12, units = "cm", dpi = 300)
+       width = 20, height = 18, units = "cm", dpi = 300)
 
 
 ```
@@ -608,19 +501,16 @@ fit_gam <- function(data, spatial = FALSE, spatial_k = 12) {
   
   if (spatial) {
     model <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
-                   s(pptAnomaly, k = 8, bs = "ts") +
-                   s(pptMeanDayAnomaly, k = 8, bs = "ts") +
+                   s(pptCV, k = 8, bs = "ts") +
                    s(pptIntensity, k = 8, bs = "ts") +
                    s(pptGt95Pc, k = 8, bs = "ts") +
                    s(pptUgi, k = 8, bs = "ts") +
                    s(seasonLength, k = 8, bs = "ts") +
-                   s(seasonOnsetAnomaly, k = 8, bs = "ts") +
                    s(tMean, k = 8, bs = "ts") +
                    s(fire, k = 8, bs = "ts") +
                    s(sand, k = 8, bs = "ts") +
                    s(soilN, k = 8, bs = "ts") +
-                   te(x, y, k = c(spatial_k, spatial_k), bs = "ts") +
-                   s(year, k = 8, bs = "ts"),
+                   te(x, y, k = c(spatial_k, spatial_k), bs = "ts"),
                  data = data,
                  method = "fREML",
                  family = Gamma(link = "log"),
@@ -630,18 +520,15 @@ fit_gam <- function(data, spatial = FALSE, spatial_k = 12) {
                  nthreads = 4)
   } else {
     model <- bam(gpp ~ s(pptMean, k = 12, bs = "ts") +
-                   s(pptAnomaly, k = 8, bs = "ts") +
-                   s(pptMeanDayAnomaly, k = 8, bs = "ts") +
+                   s(pptCV, k = 8, bs = "ts") +
                    s(pptIntensity, k = 8, bs = "ts") +
                    s(pptGt95Pc, k = 8, bs = "ts") +
                    s(pptUgi, k = 8, bs = "ts") +
                    s(seasonLength, k = 8, bs = "ts") +
-                   s(seasonOnsetAnomaly, k = 8, bs = "ts") +
                    s(tMean, k = 8, bs = "ts") +
                    s(fire, k = 8, bs = "ts") +
                    s(sand, k = 8, bs = "ts") +
-                   s(soilN, k = 8, bs = "ts") +
-                   s(year, k = 8, bs = "ts"),
+                   s(soilN, k = 8, bs = "ts"),
                  data = data,
                  method = "fREML",
                  family = Gamma(link = "log"),
@@ -654,7 +541,7 @@ fit_gam <- function(data, spatial = FALSE, spatial_k = 12) {
   model
 }
 
-# cl <- makeCluster(nc)
+cl <- makeCluster(nc)
 
 for (i in k_list) {
   
@@ -674,20 +561,7 @@ for (i in k_list) {
   toc()
 }
 
-
-# tic()
-# mod2_k12_binned <- df_model_bins %>%
-#   group_by(cover, map_bin) %>%
-#   nest() %>%
-#   mutate(mod2_k12 = map(data, fit_gam, spatial = TRUE, spatial_k = 12)) %>%
-#   select(-data)
-# toc()
-# write_rds(mod2_k12_binned, here("data", "processed", "models", "mod2_k12_binned_by_lc_subsets.rds"))
-
-# stopCluster(cl)
-
-```
-```
+stopCluster(cl)
 
 ```
 
@@ -741,12 +615,12 @@ theme_set(theme_classic())
 ## Binned GAM partial effect plots
 
 signif_vars <- c(
-  "pptCV"
-  # "pptIntensity",
-  # "pptUgi",
-  # "seasonLength",
-  # "seasonOnsetSD",
-  # "pptMeanDaySD"
+  "pptCV",
+  "pptIntensity",
+  "pptUgi",
+  "tMean",
+  "soilN",
+  "sand"
 )
 
 smooths_binned_pivot <- mod_smooths_binned_all %>%
@@ -767,12 +641,12 @@ smooths_binned_merged <- smooths_binned_pivot %>%
 # Label lookup tables
 
 var_labels <- c(
-    "'CV of annual precipitation'"
-    # "Intensity~(mm~d^-1)",
-    # "'Unranked Gini index'",
-    # "'Season length'",
-    # "'SD in season onset date (d)'",
-    # "'SD in mean rainfall day (d)'"
+    "'CV of annual precipitation'",
+    "Intensity~(mm~d^-1)",
+    "'Unranked Gini index'",
+    "'Mean air temperature (°C)'",
+    "'Soil nitrogen'~(g~kg^-2)",
+    "'Soil sand fraction (%)'"
   )
 
 bin_labels <- c("'0-400'~mm~yr^-1",
@@ -801,60 +675,6 @@ smooths_binned_labeled <- smooths_binned_merged %>%
   left_join(bin_labels_df) %>%
   left_join(cover_labels_df)
 
-# # Calculate alpha values based on point density
-# 
-# calc_bins <- function(df, col_to_bin, n = 100) {
-#   col <- df[[col_to_bin]]
-#   df_bins <- df %>%
-#     mutate(bin = cut_interval(col, n = n))
-#   df_bins_count <- count(df_bins, bin, .drop = FALSE)
-#   
-#   df_bins_count
-# }
-
-# # Moving average function
-# ma <- function(x, n = 11){stats::filter(x, rep(1 / n, n), sides = 2)}
-# 
-# # Calculate alpha based on log of ratio of bin size to dataset size
-# calc_alpha <- function(df, col_to_bin = "n", limit = -3) {
-#   col <- df[[col_to_bin]]
-#   df$log_frac <- log((col + 1) / sum(col), base = 10)
-#   df_alpha <- df %>%
-#     mutate(alpha = pmin(1, (log_frac - min(log_frac)) / (limit - min(log_frac)))) %>%
-#     mutate(alpha_ma = ma(alpha)) %>%
-#     mutate(alpha_ma = coalesce(alpha_ma, alpha))
-#   
-#   df_alpha
-# }
-# 
-# binned_data_bins <- df_model_bins %>%
-#   select(cover, map_bin, cell, year, all_of(signif_vars)) %>%
-#   filter(map_bin %in% levels(map_bin)[1:3]) %>%
-#   pivot_longer(cols = all_of(signif_vars)) %>%
-#   group_by(cover, map_bin, name) %>%
-#   nest() %>%
-#   mutate(data = map(data, calc_bins, col_to_bin = "value")) %>%
-#   mutate(data = map(data, calc_alpha)) %>%
-#   unnest(data)
-# ########
-# ggplot(density_facets_df, aes(x = value, colour = cover, fill = cover)) +
-#     geom_histogram(bins = 100, position = "identity", alpha = 0.3) +
-#     facet_grid(rows = vars(map_bin), cols = vars(name), scales = "free_x") +
-#     theme_classic()
-# ########
-
-# Assign alpha values to curves
-
-# smooths_binned_alpha <- smooths_binned_labeled %>%
-#   group_by(cover, map_bin, var) %>%
-#   slice_head(n = 100) %>%
-#   nest(.key = "smooth_data") %>%
-#   left_join(binned_data_bins %>% nest(.key = "alpha_data"),
-#             by = c("cover", "map_bin", "var" = "name")) %>%
-#   mutate(smooth_data = map2(smooth_data, alpha_data, bind_cols)) %>%
-#   select(-alpha_data) %>%
-#   unnest(smooth_data)
-
 # Generate faceted plot
 palette <- "Set2"
 
@@ -864,17 +684,16 @@ plots_binned <- ggplot(smooths_binned_labeled,
   geom_line(aes(colour = cover_label), lwd = 0.75) +
   geom_ribbon(aes(ymin = ci_low, ymax = ci_high, fill = cover_label), alpha = 0.3) +
   scale_colour_brewer(palette = palette) +
-  # scale_alpha_continuous(range = c(0.3, 1)) +
-  # guides(alpha = "none") +
   scale_fill_brewer(palette = palette) +
-  coord_cartesian(ylim = c(0.5, 1.5)) +
+  coord_cartesian(ylim = c(0, 2.5)) +
   labs(x = "Covariate value",
        y = "Partial effect",
        colour = "Land cover",
        fill = "Land cover") +
   facet_grid(rows = vars(bin_label), cols = vars(var_label),
              scales = "free_x",
-             labeller = label_parsed) +
+             labeller = label_parsed,
+             switch = "y") +
   theme_classic() +
   theme(panel.background = element_rect(fill = NA, color = "black"),
         legend.position = "top")
@@ -899,7 +718,7 @@ plot_cv_binned <- ggplot(smooths_binned_labeled,
         legend.position = "right")
 
 # Save to disk
-ggsave(here("results", "figures", "plot_binned_by_lc_merged_multi_var.jpg"),
+ggsave(here("results", "figures", "plot_binned_by_lc_multi_annual.jpg"),
        plots_binned,
        width = 16, height = 16, units = "cm", dpi = 300)
 
@@ -907,150 +726,6 @@ ggsave(here("results", "figures", "plot_binned_by_lc_cv.jpg"),
        plot_cv_binned,
        width = 12, height = 16, units = "cm", dpi = 300)
   
-
-```
-
-```{r binned_mod_viz_2}
-
-models_binned <- read_rds(here("data", "processed", "models", "models_binned_all.rds"))
-df_model <- read_csv(here("data", "processed", "csv", "df_model_multi_annual.csv"))
-
-# Set plot output directory
-
-plot_dir <- here("results", "figures")
-
-theme_set(theme_classic())
-
-## Binned GAM partial effect plots
-
-for (i in 1:nrow(models_binned)) {
-  
-  # Extract smooth shapes as data frame using gratia
-  
-  mod1_smooths <- gratia::smooth_estimates(models_binned$mod1[[i]], unconditional = TRUE) %>%
-    mutate(Model = "Non-spatial",
-           ci_low= exp(est - se * 1.96),
-           ci_high = exp(est + se * 1.96),
-           est = exp(est),
-           pptMean = pptMean * 1000)
-  mod2_k8_smooths <- gratia::smooth_estimates(models_binned$mod2_k8[[i]], unconditional = TRUE) %>%
-    mutate(Model = "Spatial - low\ncomplexity",
-           ci_low= exp(est - se * 1.96),
-           ci_high = exp(est + se * 1.96),
-           est = exp(est),
-           pptMean = pptMean * 1000) %>%
-    select(-c(x,y))
-  mod2_k12_smooths <- gratia::smooth_estimates(models_binned$mod2_k12[[i]], unconditional = TRUE) %>%
-    mutate(Model = "Spatial - medium\ncomplexity",
-           ci_low= exp(est - se * 1.96),
-           ci_high = exp(est + se * 1.96),
-           est = exp(est),
-           pptMean = pptMean * 1000) %>%
-    select(-c(x,y))
-  mod2_k16_smooths <- gratia::smooth_estimates(models_binned$mod2_k16[[i]], unconditional = TRUE) %>%
-    mutate(Model = "Spatial - high\ncomplexity",
-           ci_low= exp(est - se * 1.96),
-           ci_high = exp(est + se * 1.96),
-           est = exp(est),
-           pptMean = pptMean * 1000) %>%
-    select(-c(x,y))
-  
-  # Combine models into single data frame
-  mod_smooths <- bind_rows(mod1_smooths,
-                           mod2_k8_smooths,
-                           mod2_k12_smooths,
-                           mod2_k16_smooths) %>%
-    filter(type == "TPRS (shrink)")
-  
-  # Read in data labels lookup table
-  
-  var_labels <- read_csv(here("data", "raw", "csv", "var_labels_annual.csv"))
-  
-  var_list <- var_labels$vars
-  
-  plots <- list(length = length(var_list))
-  
-  # Generate plots
-  
-  plots <- map(var_list, function(var) {
-    
-    # Labels for each facet window
-    # Create expressions for those with superscript/subscripts
-    x_label <- var_labels$label[var_labels$vars == var]
-    if (var_labels$parse[var_labels$vars == var]) {
-      x_label <- parse(text = x_label)
-    }
-  
-    # Plot data density plot
-    data_df <- models_binned$data[[i]] %>%
-      select(x, y, all_of(var)) %>%
-      rename(z = 3)
-    
-    density <- ggplot(data_df, aes(x = z)) +
-      geom_density(colour = "grey70", fill = "grey90", alpha = 0.6) +
-      theme_void()
-    density
-    
-    # Plot model smooths
-    smooth_df <- mod_smooths %>%
-      select(smooth, type, est, se, ci_low, ci_high, Model,
-               all_of(var)) %>%
-      mutate(Model = factor(Model, levels = c("Non-spatial",
-                                              "Spatial - low\ncomplexity",
-                                              "Spatial - medium\ncomplexity",
-                                              "Spatial - high\ncomplexity")),
-             Model = ordered(Model)) %>%
-      rename(var0 = 8) %>%
-      drop_na()
-    
-  # Calculate bins
-  diff <- smooth_df$var0[2] - smooth_df$var0[1]
-
-  df_bins <- data_df %>%
-    mutate(bin = cut_interval(z, length = diff)) %>%
-    count(bin, .drop = FALSE)
-
-  alpha_list <- pmin(1, (df_bins$n / (nrow(df_model) / 100))) %>%
-    rep(4)
-  smooth_df$alpha <- alpha_list[1:400]
-  
-  
-  plot <- ggplot(smooth_df, aes(x = var0, y = est,
-                                alpha = alpha
-                                )) +
-    geom_hline(yintercept = 1, colour = "grey80", linetype = "longdash") +
-    # geom_ribbon(aes(ymin = ci_low, ymax = ci_high,
-    # fill = Model)) +
-    geom_line(aes(colour = Model), lwd = 0.6) +
-    scale_colour_manual(values = c("#888888", "#41ab5d", "#238443","#004529")) +
-    scale_linetype_manual(values = c("longdash", "solid", "solid", "solid")) +
-    scale_alpha_continuous(range = c(0.3, 1)) +
-    # scale_fill_manual(values = c("#DDDDDD", "#daffd3", "#51c384","#208d4c")) +
-    guides(alpha = "none") +
-    ylim(0, 2.5) +
-    labs(x = x_label,
-         y = "Partial effect")
-  
-  if(var_labels$min_0[var_labels$vars == var] == 1) {
-    plot <- plot + scale_x_continuous(limits = c(0, max(smooth_df$var0)))
-  }
-    
-    # Arrange into small multiples with patchwork package 
-    density + plot +
-        plot_layout(ncol = 1, nrow = 2, widths = 4, heights = c(1, 4))
-    })
-    
-    # Create main GAM figure
-    gam_plot <- ggarrange(plotlist = plots, ncol = 3, nrow = 4, common.legend = TRUE)
-    
-    # Save main GAM figure
-    ggsave(here(plot_dir, paste0("binned_gam_plot_exp_", i, ".jpg")),
-           plot = gam_plot,
-           width = 20, height = 30, units = "cm", dpi = 300)
-  
-}
-
-
 
 ```
 
