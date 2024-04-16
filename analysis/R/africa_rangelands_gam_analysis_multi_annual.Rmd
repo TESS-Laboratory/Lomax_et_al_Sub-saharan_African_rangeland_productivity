@@ -96,7 +96,7 @@ Variable definitions:
 |pptGt10|Fraction of days per year with >10 mm rainfall|unitless 0-1|CHIRPS|
 |pptGt30|Fraction of days per year with >30 mm rainfall|unitless 0-1|CHIRPS|
 |pptUgi|Unranked Gini index of daily precipitation|unitless 0-1|CHIRPS|
-|season|Average rainy season length|days|CHIRPS|
+|seasonLength|Average rainy season length|days|CHIRPS|
 |-------------|----------|----|
 |sand|Soil sand fraction 0-20cm|%|iSDAsoil|
 |clay|Soil clay fraction 0-20cm|%|iSDAsoil|
@@ -148,7 +148,10 @@ write_csv(df_model,
 
 ```
 
-Fit models including target covariates:
+Fit four models for each land cover type: one without a spatial (x,y) term, and
+three with different degrees of complexity allowed (k = c(8,8) to k = c(16,16)).
+The range of results of these models accounts for spatial autocorrelation and
+allows a robustness check of the results to the degree of spatial structure.
 
 ```{r model_fit, eval = FALSE}
 

@@ -108,17 +108,17 @@ igbp_mask <- mask(igbp, africa_vct)
 
 # Most common assigned IGBP class
 
-# getMode <- function(x) {
-# keys <- na.omit(unique(x))
-# keys[which.max(tabulate(match(x, keys)))]
-# }
-# 
-# igbp_mode <- app(igbp_mask, getMode)
-# 
-# # Write and read modal IGBP class layer (slow to calculate)
-# writeRaster(igbp_mode, here("data", "processed", "raster",
-#                             "igbp_mode.tif"),
-#             overwrite = TRUE)
+getMode <- function(x) {
+keys <- na.omit(unique(x))
+keys[which.max(tabulate(match(x, keys)))]
+}
+
+igbp_mode <- app(igbp_mask, getMode)
+
+# Write and read modal IGBP class layer (slow to calculate)
+writeRaster(igbp_mode, here("data", "processed", "raster",
+                            "igbp_mode.tif"),
+            overwrite = TRUE)
 
 igbp_mode <- rast(here("data", "processed", "raster",
                        "igbp_mode.tif"))
