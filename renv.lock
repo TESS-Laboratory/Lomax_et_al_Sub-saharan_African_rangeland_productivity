@@ -901,23 +901,11 @@
       ],
       "Hash": "122e8341ead01f3746dd312ecc5ffd28"
     },
-    "ggokabeito": {
-      "Package": "ggokabeito",
-      "Version": "0.1.0",
-      "Source": "Repository",
-      "Repository": "RSPM",
-      "Requirements": [
-        "R",
-        "ggplot2",
-        "grDevices"
-      ],
-      "Hash": "3ebb1aa87a9e095e5693c7fa782a6b1b"
-    },
     "ggplot2": {
       "Package": "ggplot2",
-      "Version": "3.5.0",
+      "Version": "3.4.4",
       "Source": "Repository",
-      "Repository": "CRAN",
+      "Repository": "RSPM",
       "Requirements": [
         "MASS",
         "R",
@@ -936,7 +924,7 @@
         "vctrs",
         "withr"
       ],
-      "Hash": "52ef83f93f74833007f193b2d4c159a2"
+      "Hash": "313d31eff2274ecf4c1d3581db7241f9"
     },
     "ggpubr": {
       "Package": "ggpubr",
@@ -1085,12 +1073,11 @@
       "Package": "gratia",
       "Version": "0.8.1",
       "Source": "Repository",
-      "Repository": "CRAN",
+      "Repository": "RSPM",
       "Requirements": [
         "R",
         "cli",
         "dplyr",
-        "ggokabeito",
         "ggplot2",
         "grDevices",
         "grid",
@@ -1108,10 +1095,9 @@
         "tidyr",
         "tidyselect",
         "tools",
-        "vctrs",
-        "withr"
+        "vctrs"
       ],
-      "Hash": "8058500e770680220d7ad98789ae99ad"
+      "Hash": "aac574583d985c85f803e25089b35fe5"
     },
     "gridExtra": {
       "Package": "gridExtra",
