@@ -35,15 +35,13 @@ africa_vct <- vect(africa)
 
 # Load multi-annual data frame for modelling
 
-df <- read_csv(here("data", "processed", "csv", "df_multi_annual.csv")) %>%
+df <- read_csv(here("data", "processed", "csv", "df_annual.csv")) %>%
   select(cell, lc, x, y, gpp, starts_with("ppt"), starts_with("season"), everything())
 
 # Add land cover class names
 igbp_index <- tibble(
-  lc = c(6, 7, 8, 9, 10),
-  cover = factor(c("Closed shrublands",
-                   "Open shrublands",
-                   "Woody savannas",
+  lc = c(7, 9, 10),
+  cover = factor(c("Open shrublands",
                    "Open savannas",
                    "Grasslands")))
 df_cover <- left_join(df, igbp_index)
@@ -75,20 +73,18 @@ base_plot <- ggplot(plot_sample,
   theme_bw() +
   guides(colour = guide_legend(override.aes = list(size = 2)))
 
-pptMean_pptCV <- base_plot + geom_point(aes(x = pptMean, y = pptCV), size = 0.1) +
-  labs(x = expression(pptMean ~ (mm ~ yr^-1)), y = "CV (%)")
+pptMean_pptAnomaly <- base_plot + geom_point(aes(x = pptMean, y = pptAnomaly), size = 0.1) +
+  labs(x = expression(pptMean ~ (mm ~ yr^-1)), y = "Annual anomaly")
 pptMean_int <- base_plot + geom_point(aes(x = pptMean, y = pptIntensity), size = 0.1) +
   labs(x = expression(pptMean ~ (mm ~ yr^-1)), y = expression(Intensity ~ (mm ~ d^-1)))
 pptMean_season <- base_plot + geom_point(aes(x = pptMean, y = seasonLength), size = 0.1) +
   labs(x = expression(pptMean ~ (mm ~ yr^-1)), y = "Rainy season\nlength (d)")
-pptMean_onset_sd <- base_plot + geom_point(aes(x = pptMean, y = seasonOnsetSD), size = 0.1) +
-  labs(x = expression(pptMean ~ (mm ~ yr^-1)), y = "Season\nonset SD")
 pptMean_ugi <- base_plot + geom_point(aes(x = pptMean, y = pptUgi), size = 0.1) +
   labs(x = expression(pptMean ~ (mm ~ yr^-1)), y = "UGi")
 pptMean_wet95 <- base_plot + geom_point(aes(x = pptMean, y = pptGt95Pc), size = 0.1) +
   labs(x = expression(pptMean ~ (mm ~ yr^-1)), y = expression(F["95w"]))
 
-p1 <- ggarrange(pptMean_pptCV, pptMean_ugi, pptMean_season, pptMean_onset_sd, pptMean_int, pptMean_wet95,
+p1 <- ggarrange(pptMean_pptAnomaly, pptMean_ugi, pptMean_season, pptMean_int, pptMean_wet95,
           ncol = 2, nrow = 3, common.legend = TRUE)
 
 gpp_expr <- expression(GPP ~ (gC ~ m^-2 ~ yr^-1))
@@ -104,8 +100,8 @@ gpp_fire <- base_plot + geom_point(aes(x = fire, y = gpp), size = 0.1, alpha = 0
 
 gpp_pptMean <- base_plot + geom_point(aes(x = pptMean, y = gpp), size = 0.1, alpha = 0.5) +
   labs(x = expression(pptMean ~ (mm ~ yr^-1)), y = gpp_expr)
-gpp_pptCV <- base_plot + geom_point(aes(x = pptCV, y = gpp), size = 0.1, alpha = 0.5) +
-  labs(x = "CV of annual\nprecipitation (%)", y = gpp_expr)
+gpp_pptAnomaly <- base_plot + geom_point(aes(x = pptAnomaly, y = gpp), size = 0.1, alpha = 0.5) +
+  labs(x = "Annual precipitation anomlay", y = gpp_expr)
 gpp_int <- base_plot + geom_point(aes(x = pptIntensity, y = gpp), size = 0.1, alpha = 0.5) +
   labs(x = expression(Precipitation ~ intensity ~(mm ~ d^-1)), y = gpp_expr)
 gpp_dry <- base_plot + geom_point(aes(x = pptDryDays, y = gpp), size = 0.1, alpha = 0.5) +
@@ -116,17 +112,13 @@ gpp_wet95 <- base_plot + geom_point(aes(x = pptGt95Pc, y = gpp), size = 0.1, alp
   labs(x = expression(F["95w"]), y = gpp_expr)
 gpp_season <- base_plot + geom_point(aes(x = seasonLength, y = gpp), size = 0.1, alpha = 0.5) +
   labs(x = "Wet season\nlength (days)", y = gpp_expr)
-gpp_onset_sd <- base_plot + geom_point(aes(x = seasonOnsetSD, y = gpp), size = 0.1, alpha = 0.5) +
-  labs(x = "SD of wet\nseason onset (days)", y = gpp_expr)
-gpp_mean_day_sd <- base_plot + geom_point(aes(x = pptMeanDaySD, y = gpp), size = 0.1, alpha = 0.5) +
-  labs(x = "SD of mean rainfall day (days)", y = gpp_expr)
 gpp_soilN <- base_plot + geom_point(aes(x = soilN, y = gpp), size = 0.1, alpha = 0.5) +
-  labs(x = expression(Soil ~ nitrogen ~ (g ~ kg^-1)), gpp_expr)
+  labs(x = expression(Soil ~ nitrogen ~ (g ~ kg^-1)), y = gpp_expr)
 gpp_soilP <- base_plot + geom_point(aes(x = soilP, y = gpp), size = 0.1, alpha = 0.5) +
   labs(x = "Soil extractable\nphosphorus (ppm)", y = gpp_expr)
 
-p2 <- ggarrange(gpp_pptMean, gpp_pptCV, gpp_int, gpp_wet95, gpp_ugi, gpp_season, gpp_onset_sd, gpp_mean_day_sd,
-                nrow = 4, ncol = 2, common.legend = TRUE)
+p2 <- ggarrange(gpp_pptMean, gpp_pptAnomaly, gpp_int, gpp_wet95, gpp_ugi, gpp_season,
+                nrow = 3, ncol = 2, common.legend = TRUE)
 
 p3 <- ggarrange(gpp_T, gpp_soilN, gpp_sand, gpp_fire,
                 nrow = 2, ncol = 2, common.legend = TRUE)
@@ -138,7 +130,7 @@ ggsave(here(plot_dir, "p1.png"),
        width = 16, height = 20, units = "cm", dpi = 300)
 ggsave(here(plot_dir, "p2.png"),
        plot = p2,
-       width = 16, height = 24, units = "cm", dpi = 300)
+       width = 16, height = 20, units = "cm", dpi = 300)
 ggsave(here(plot_dir, "p3.png"),
        plot = p3,
        width = 16, height = 18, units = "cm", dpi = 300)
@@ -157,7 +149,7 @@ annual_var_names_for_mean <- c(
   "tMean", "modisBurn"
 )
 
-annual_var_names_for_sd <- c("pptTotal", "seasonOnsetAnomaly", "pptMeanDay")
+annual_var_names_for_sd <- c("pptTotal")
 
 # Extract static variables
 static_vars <- subset(var_stack_all, static_var_names)
@@ -186,12 +178,15 @@ sd_vars <- map(annual_var_names_for_sd, function(var_name) {
   sd_layer
 }) %>% rast()
 
-names(sd_vars) <- c("pptSD", "seasonOnsetSD", "pptMeanDaySD")
+names(sd_vars) <- c("pptSD")
 sd_vars[["pptCV"]] <- sd_vars[["pptSD"]] / mean_vars[["pptMean"]]
 
 # Merge back into single spatRaster object
 var_stack <- c(static_vars, mean_vars, sd_vars)
 
+# Mask to exclude "woody savannas"
+var_stack_nonwoody <- mask(var_stack, var_stack$lc %in% c(7, 9, 10), maskvalues = c(0, NA))
+values(study_area_mask)[values(var_stack$lc) == 8] <- 0
 
 ```
 
@@ -221,14 +216,15 @@ sa_basemap <- tm_shape(outside_sa) +
   tm_raster(palette = "grey85", legend.show = FALSE)
 
 # Study area map
-sa_map <- tm_shape(var_stack[["lc"]]) +
-  tm_raster(style = "cat", palette = "Accent",
-            labels = as.character(igbp_index$cover[2:5]), title = "") +
+sa_map <- tm_shape(var_stack_nonwoody[["lc"]]) +
+  tm_raster(style = "cat", palette = "-Set2",
+            labels = as.character(igbp_index$cover), title = "Land cover class") +
   sa_basemap +
-  africa_basemap
+  africa_basemap +
+  tm_layout(main.title = "d)")
 
 # GPP across region
-gpp_map <- tm_shape(var_stack[["gpp"]]) + 
+gpp_map <- tm_shape(var_stack_nonwoody[["gpp"]]) + 
   tm_raster(n = 9, palette = "YlGn", style = "cont", title = expression(GPP ~ (gC ~ m^-2 ~ yr^-1)),
             breaks = seq(0, 2500, 500)) +
   sa_basemap +
@@ -237,33 +233,32 @@ gpp_map <- tm_shape(var_stack[["gpp"]]) +
 
 # Precipitation maps
 
-map_map <- tm_shape(var_stack[["pptMean"]]) +
+map_map <- tm_shape(var_stack_nonwoody[["pptMean"]]) +
   tm_raster(style = "cont", palette = "YlGnBu", title = expression("MAP" ~ (mm ~ yr^-1)),
             breaks = seq(0, 1500, 300)) +
   sa_basemap +
   africa_basemap +
   tm_layout(main.title = "b)")
 
-cv_map <- tm_shape(var_stack[["pptCV"]]) +
+cv_map <- tm_shape(var_stack_nonwoody[["pptCV"]]) +
   tm_raster(style = "cont", n = 10, palette = "RdPu", title = "CV of annual\nprecipitation (%)",
             breaks = seq(0, 0.60, 0.10)) +
   sa_basemap +
   africa_basemap
 
-intensity_map <- tm_shape(var_stack[["pptIntensity"]]) +
+intensity_map <- tm_shape(var_stack_nonwoody[["pptIntensity"]]) +
   tm_raster(style = "cont", palette = "PRGn", title = expression(Intensity ~ (mm ~ day^-1)),
             breaks = seq(0, 25, 5)) +
   sa_basemap +
-  africa_basemap +
-  tm_layout(main.title = "d)")
+  africa_basemap
 
-ugi_map <- tm_shape(var_stack[["pptUgi"]]) +
+ugi_map <- tm_shape(var_stack_nonwoody[["pptUgi"]]) +
   tm_raster(style = "cont", n = 10, palette = "-PRGn", title = "UGi of daily\nprecipitation",
             breaks = seq(0.1, 0.6, 0.1), midpoint = 0.35) +
   sa_basemap +
   africa_basemap
 
-wet95_map <- tm_shape(var_stack[["pptGt95Pc"]]) +
+wet95_map <- tm_shape(var_stack_nonwoody[["pptGt95Pc"]]) +
   tm_raster(style = "cont", n = 10, palette = "OrRd", title = "Fraction of precipitation\nover 95th percentile",
             breaks = seq(0, 0.25, 0.05)) +
   sa_basemap +
@@ -271,45 +266,33 @@ wet95_map <- tm_shape(var_stack[["pptGt95Pc"]]) +
 
 # Seasonality maps
 
-season_map <- tm_shape(var_stack[["seasonLength"]] %>% mask(var_stack[["seasonLength"]] > 0, maskvalues = c(NA, 0))) +
+season_map <- tm_shape(var_stack_nonwoody[["seasonLength"]] %>% mask(var_stack_nonwoody[["seasonLength"]] > 0, maskvalues = c(NA, 0))) +
   tm_raster(style = "cont", palette = "RdYlBu", title = "Rainy season\nlength (days)",
             breaks = seq(0, 300, 50), midpoint = 150) +
   sa_basemap +
   africa_basemap
 
-onset_sd_map <- tm_shape(var_stack[["seasonOnsetSD"]]) +
-  tm_raster(style = "cont", palette = "-RdYlBu", title = "Season onset SD",
-            breaks = seq(0, 40, 10)) +
-  sa_basemap +
-  africa_basemap
-
-mean_day_sd_map <- tm_shape(var_stack[["pptMeanDaySD"]]) +
-  tm_raster(style = "cont", palette = "-RdYlBu", title = "Mean rainfall date SD",
-            breaks = seq(0, 40, 10)) +
-  sa_basemap +
-  africa_basemap
-
 # Soil property maps
 
-soilN_map <- tm_shape(var_stack[["soilN"]]) +
+soilN_map <- tm_shape(var_stack_nonwoody[["soilN"]]) +
   tm_raster(style = "cont", palette = "YlGn", title = expression(soilN ~ (g ~ kg^-1)),
             breaks = seq(0, 2, 0.4)) +
   sa_basemap +
   africa_basemap
 
-soilP_map <- tm_shape(var_stack[["soilP"]]) +
+soilP_map <- tm_shape(var_stack_nonwoody[["soilP"]]) +
   tm_raster(style = "cont", palette = "YlGn", title = expression(soilP ~ (g ~ kg^-1)),
             breaks = seq(0, 25, 5)) +
   sa_basemap +
   africa_basemap
 
-sand_map <- tm_shape(var_stack[["sand"]]) +
+sand_map <- tm_shape(var_stack_nonwoody[["sand"]]) +
   tm_raster(style = "cont", palette = "-BrBG", title = "Soil sand %",
             breaks = seq(0, 100, 20)) +
   sa_basemap +
   africa_basemap
 
-clay_map <- tm_shape(var_stack[["clay"]]) +
+clay_map <- tm_shape(var_stack_nonwoody[["clay"]]) +
   tm_raster(style = "cont", palette = "-BrBG", title = "Soil clay %",
             breaks = seq(0, 100, 20)) +
   sa_basemap +
@@ -317,7 +300,7 @@ clay_map <- tm_shape(var_stack[["clay"]]) +
 
 # Temperature maps
 
-T_map <- tm_shape(var_stack[["tMean"]]) +
+T_map <- tm_shape(var_stack_nonwoody[["tMean"]]) +
   tm_raster(style = "cont", n = 10, palette = "-RdYlBu", title = "Mean air\ntemperature (\u00B0C)",
             breaks = seq(10, 35, 5)) +
   sa_basemap +
@@ -326,7 +309,7 @@ T_map <- tm_shape(var_stack[["tMean"]]) +
 
 # Fire frequency map
 
-fire_map <- tm_shape(var_stack[["modisBurn"]]) +
+fire_map <- tm_shape(var_stack_nonwoody[["modisBurn"]]) +
   tm_raster(style = "cont", palette = "YlOrRd", title = expression(Fire ~ frequency ~ (yr^-1)),
             breaks = seq(0, 0.8, 0.2)) +
   sa_basemap +
@@ -334,14 +317,14 @@ fire_map <- tm_shape(var_stack[["modisBurn"]]) +
 
 # Save map figures to directory
 
-tmap_save(sa_map,
-          here(plot_dir, "sa_map_plot.png"),
+tmap_save(season_map,
+          here(plot_dir, "season_map_plot.png"),
           width = 16, height = 12, units = "cm", dpi = 300)
 
-multi_plot <- tmap_arrange(gpp_map, map_map, T_map, intensity_map)
+multi_plot <- tmap_arrange(gpp_map, map_map, T_map, sa_map)
 
 tmap_save(multi_plot,
           here(plot_dir, "multi_map_plot.png"),
-          width = 24, height = 18, units = "cm", dpi = 300)
+          width = 18, height = 18, units = "cm", dpi = 300)
 
 ```
