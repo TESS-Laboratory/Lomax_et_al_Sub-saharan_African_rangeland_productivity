@@ -1,0 +1,11 @@
+﻿vars,label,min_0
+pptMean,'MAP ' (mm ~ yr^-1),1
+pptCV,'Interannual CV',1
+tMean,'Mean air temperature (°C)',0
+pptIntensity,'Intensity ' (mm ~ d^-1),1
+pptGt95Pc,F['95w'],1
+pptUgi,'Unranked Gini index',0
+seasonLength,'Season length (d)',0
+fire,'Fire frequency ' (yr^-1),1
+soilN,'Soil nitrogen ' (g ~ kg^-1),1
+sand,'Soil sand fraction',0

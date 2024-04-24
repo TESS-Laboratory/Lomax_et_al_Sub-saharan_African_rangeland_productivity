@@ -287,30 +287,14 @@ mod2_k8_savanna <- read_rds(here("data", "processed", "models", "mod2_k8_Open_sa
 mod2_k12_savanna <- read_rds(here("data", "processed", "models", "mod2_k12_Open_savannas.rds"))
 mod2_k16_savanna <- read_rds(here("data", "processed", "models", "mod2_k16_Open_savannas.rds"))
 
-# Model results
-# 
-# plot(mod1, shade = TRUE, seWithMean = TRUE, scheme = 2,
-#      pages = 3)
-# plot(mod2_k8, shade = TRUE, seWithMean = TRUE, scheme = 2,
-#      pages = 3)
-# plot(mod2_k12, shade = TRUE, seWithMean = TRUE, scheme = 2,
-#      pages = 3)
-# plot(mod2_k16, shade = TRUE, seWithMean = TRUE, scheme = 2,
-#      pages = 3)
-
-# print("Spatial term k = 8")
-# gam.check(mod2_k8)
-# print("Spatial term k = 12")
-# gam.check(mod2_k12)
-# print("Spatial term k = 16")
-# gam.check(mod2_k16)
-
 ```
 
 
 # Plot GAM results
 
 ``` {r term_plots, eval = FALSE}
+
+target_vars <- c("pptMean", "pptCV", "tMean", "pptIntensity", "soilN", "sand")
 
 df_model <- read_csv(here("data", "processed", "csv", "df_model_multi_annual.csv"))
 
@@ -351,11 +335,9 @@ mod_smooths_all <- tibble(cover = rep(cover_list, each = 4),
 
 # Read in data labels lookup table
 
-var_labels <- read_csv(here("data", "raw", "csv", "var_labels.csv"))
+var_labels <- read_csv(here("data", "raw", "csv", "var_labels_multi_annual.csv"))
 
 var_list <- var_labels$vars
-
-target_list <- c("pptMean", "pptCV", "tMean", "pptIntensity", "soilN", "sand")
 
 # Combine smooths from key models
 mod_smooths_summary <- mod_smooths_all %>%
@@ -378,9 +360,7 @@ plots <- map(var_list, function(var) {
   # Labels for each facet window
   # Create expressions for those with superscript/subscripts
   x_label <- var_labels$label[var_labels$vars == var]
-  if (var_labels$parse[var_labels$vars == var]) {
-    x_label <- parse(text = x_label)
-  }
+  x_label <- parse(text = x_label)
 
   # Plot data density plot
   data_df <- df_model_clean %>%
@@ -434,54 +414,6 @@ ggsave(here(plot_dir, "gam_plot_all_sp_multi_annual.jpg"),
 
 
 ```
-
-
-Model diagnostic and residual plots:
-
-```{r diag_plots}
-
-# Model diagnostic plots
-
-mod1_diag <- appraise(mod1, ci_alpha = 0.5, point_alpha = 0.05, n_bins = 50)
-mod2_k8_diag <- appraise(mod2_k8, ci_alpha = 0.5, point_alpha = 0.05, n_bins = 50)
-mod2_k12_diag <- appraise(mod2_k12, ci_alpha = 0.5, point_alpha = 0.05, n_bins = 50)
-mod2_k16_diag <- appraise(mod2_k16, ci_alpha = 0.5, point_alpha = 0.05, n_bins = 50)
-
-mod1_diag
-mod2_k8_diag 
-mod2_k12_diag
-mod2_k16_diag
-
-ggsave(here("results", "figures", "mod1_diag.png"), mod1_diag,
-       width = 26.5, height = 22, units = "cm", dpi = 200)
-ggsave(here("results", "figures", "mod2_k8_diag.png"), mod2_k8_diag,
-       width = 26.5, height = 22, units = "cm", dpi = 200)
-ggsave(here("results", "figures", "mod2_k12_diag.png"), mod2_k16_diag,
-       width = 26.5, height = 22, units = "cm", dpi = 200)
-ggsave(here("results", "figures", "mod2_k16_diag.png"), mod2_k16_diag,
-       width = 26.5, height = 22, units = "cm", dpi = 200)
-
-
-# Residual map
-resid_raster <- df_model %>%
-  mutate(resids = residuals(mod2_k16)) %>%
-  select(x, y, resids) %>%
-  rast(crs = "EPSG:4326")
-
-resid_plot <- tm_shape(resid_raster) + 
-  tm_raster(palette = "RdYlBu", style = "cont",
-            breaks = c(-1, -0.5, 0, 0.5, 1),
-            title = "Model residuals",
-            legend.reverse = TRUE) +
-  sa_basemap_2 +
-  africa_basemap
-
-tmap_save(resid_plot,
-          here(plot_dir, "mod2_k16_resid_map.jpg"),
-          width = 16, height = 12, unit = "cm", dpi = 300)
-
-```
-
 
 Repeat model for separate MAP bins:
 
@@ -637,7 +569,7 @@ theme_set(theme_classic())
 
 ## Binned GAM partial effect plots
 
-signif_vars <- c(
+target_vars <- c(
   "pptCV",
   "pptIntensity",
   "pptUgi",
@@ -648,9 +580,9 @@ signif_vars <- c(
 
 smooths_binned_pivot <- mod_smooths_binned_all %>%
   select(cover, map_bin, k,
-         all_of(signif_vars),
+         all_of(target_vars),
          est, se, ci_low, ci_high) %>%
-  pivot_longer(cols = all_of(signif_vars),
+  pivot_longer(cols = all_of(target_vars),
                names_to = "var", values_to = "value") %>%
   drop_na()
 
@@ -664,22 +596,18 @@ smooths_binned_merged <- smooths_binned_pivot %>%
 
 # Label lookup tables
 
-var_labels <- c(
-    "'CV of annual precipitation'",
-    "Intensity~(mm~d^-1)",
-    "'Unranked Gini index'",
-    "'Mean air temperature (°C)'",
-    "'Soil nitrogen'~(g~kg^-2)",
-    "'Soil sand fraction (%)'"
-  )
+var_labels <- read_csv(here("data", "raw", "csv", "var_labels_multi_annual.csv"))
+
+target_var_labels <- var_labels %>%
+  filter(vars %in% target_vars)
 
 bin_labels <- c("'0-400'~mm~yr^-1",
                 "'400-800'~mm~yr^-1",
                 "'800-1,200'~mm~yr^-1")
 
 var_labels_df <- tibble(
-  var = signif_vars,
-  var_label = ordered(var_labels, levels = var_labels)
+  var = target_vars,
+  var_label = ordered(target_var_labels$label, levels = target_var_labels$label)
 )
 
 bin_labels_df <- tibble(

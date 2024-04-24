@@ -320,7 +320,7 @@ stopCluster(cl)
 
 Load saved models and run model diagnostics
 
-```{r standard_models_viz}
+```{r standard_models_load}
 
 mod1_grass <- read_rds(here("data", "processed", "models", "mod1_Grasslands_annual.rds"))
 mod2_k8_grass <- read_rds(here("data", "processed", "models", "mod2_k8_Grasslands_annual.rds"))
@@ -337,18 +337,6 @@ mod2_k8_savanna <- read_rds(here("data", "processed", "models", "mod2_k8_Open_sa
 mod2_k12_savanna <- read_rds(here("data", "processed", "models", "mod2_k12_Open_savannas_annual.rds"))
 mod2_k16_savanna <- read_rds(here("data", "processed", "models", "mod2_k16_Open_savannas_annual.rds"))
 
-# mod_diag_grass <- appraise(mod2_k12_grass, ci_alpha = 0.5, point_alpha = 0.05, n_bins = 50)
-# mod_diag_shrub <- appraise(mod2_k12_shrub, ci_alpha = 0.5, point_alpha = 0.05, n_bins = 50)
-# mod_diag_savanna <- appraise(mod2_k12_savanna, ci_alpha = 0.5, point_alpha = 0.05, n_bins = 50)
-
-# 
-# ggsave(here("results", "figures", "mod1_diag_grass.png"), mod_diag_grass,
-#        width = 26.5, height = 22, units = "cm", dpi = 200)
-# ggsave(here("results", "figures", "mod_diag_shrub.png"), mod_diag_shrub,
-#        width = 26.5, height = 22, units = "cm", dpi = 200)
-# ggsave(here("results", "figures", "mod_diag_savanna.png"), mod_diag_savanna,
-#        width = 26.5, height = 22, units = "cm", dpi = 200)
-
 ```
 
 
@@ -356,6 +344,8 @@ mod2_k16_savanna <- read_rds(here("data", "processed", "models", "mod2_k16_Open_
 # Plot GAM results
 
 ```{r term_plots}
+
+target_vars <- c("pptMean", "pptAnomaly", "tMean", "pptIntensity", "soilN", "sand")
 
 df_model_sample <- read_csv(here("data", "processed", "csv", "df_model_annual_sample.csv"))
 
@@ -380,8 +370,6 @@ theme_set(theme_classic())
 var_labels <- read_csv(here("data", "raw", "csv", "var_labels_annual.csv"))
 
 var_list <- var_labels$vars
-
-signif_vars <- c("pptMean", "pptAnomaly", "tMean", "pptIntensity", "soilN", "sand")
 
 ## Main GAM partial effect plots
 
@@ -416,14 +404,12 @@ palette <- "Set2"
 
 # Generate plots
 
-plots <- map(signif_vars, function(var) {
+plots <- map(target_vars, function(var) {
   
   # Labels for each facet window
   # Create expressions for those with superscript/subscripts
   x_label <- var_labels$label[var_labels$vars == var]
-  if (var_labels$parse[var_labels$vars == var]) {
-    x_label <- parse(text = x_label)
-  }
+  x_label <- parse(text = x_label)
   
   # Plot data density plot
   data_df <- df_model_sample_clean %>%
@@ -480,91 +466,6 @@ ggsave(here(plot_dir, "gam_plot_signif_sp_annual.jpg"),
        plot = gam_plot,
        width = 20, height = 18, units = "cm", dpi = 300)
 
-## Create maps of spatial term
-
-# Africa country boundaries (Natural Earth dataset)
-countries <- st_read(here("data", "raw", "vector", "natural_earth",
-                          "ne_110m_admin_0_countries_fixed.shp"))
-africa <- filter(countries, CONTINENT == "Africa")
-africa_vct <- vect(africa)
-
-study_area_mask <- rast(here("data", "processed", "raster", "study_area_mask.tif"))
-lc_mask <- rast(here("data", "processed", "raster", "var_raster_stack.tif")) %>%
-  subset("lc")
-
-shrub_mask <- lc_mask == 7
-savanna_mask <- lc_mask == 9
-grass_mask <- lc_mask == 10
-
-lc_list <- list(shrub_mask, savanna_mask, grass_mask)
-
-# Load spatial smooths from different models
-spatial_smooth_shrub <- gratia::smooth_estimates(
-  mod2_k16_shrub,
-  n = 300,
-  smooth = "te(x,y)",
-  dist = 0.01) %>%
-  as.data.frame() %>%
-  mutate(est = exp(est)) %>%
-  select(x, y, est)
-spatial_smooth_savanna <- gratia::smooth_estimates(
-  mod2_k16_savanna,
-  n = 300,
-  smooth = "te(x,y)",
-  dist = 0.01) %>%
-  as.data.frame() %>%
-  mutate(est = exp(est)) %>%
-  select(x, y, est)
-spatial_smooth_grass <- gratia::smooth_estimates(
-  mod2_k16_grass,
-  n = 300,
-  smooth = "te(x,y)",
-  dist = 0.01) %>%
-  as.data.frame() %>%
-  mutate(est = exp(est)) %>%
-  select(x, y, est)
-
-# Combine into single SpatRaster layer
-spatial_smooths_list <- list(spatial_smooth_shrub, spatial_smooth_savanna, spatial_smooth_grass)
-
-spatial_rast <- purrr::map2(spatial_smooths_list, lc_list, function(df, lc_mask) {
-  r <- rast(df, crs = "epsg:4326") %>%
-    resample(lc_mask) %>%
-    mask(lc_mask, maskvalues = c(0, NA))
-  r
-}) %>% purrr::reduce(merge)
-
-# Create map
-africa_basemap <- tm_shape(africa) + tm_borders() +
-  tm_graticules(n.x = 6, n.y = 6, col = "grey", labels.size = 0.6)
-
-# Create additional mask raster to overlay on excluded regions
-outside_sa <- mask(study_area_mask, study_area_mask, maskvalues = c(1, NA))
-
-sa_basemap_2 <- tm_shape(outside_sa) +
-  tm_raster(palette = "grey75", legend.show = FALSE)
-
-rast_plot <- tm_shape(spatial_rast) +
-  tm_raster(
-    col.scale = tm_scale_continuous(
-      values = "RdYlBu",
-      midpoint = 1,
-      limits = c(0, 2),
-      outliers.trunc = c(TRUE, TRUE)
-      ),
-    col.legend = tm_legend(
-      title = "Partial effect of spatial term",
-      position = c("left", "bottom"),
-      bg.colour = "white")
-    ) +
-  sa_basemap_2 +
-  africa_basemap
-
-# Save spatial term map
-tmap_save(rast_plot,
-          paste0(plot_dir, "/spatial_term_annual.jpg"),
-          width = 16, height = 12, units = "cm", dpi = 300)
-
 
 ```
 
@@ -574,35 +475,18 @@ Model diagnostic and residual plots
 
 ```{r diag_plots, eval = FALSE}
 
-# Model diagnostic plots
-
-mod1_diag <- appraise(mod1, n_bins = 60, point_alpha = 0.05, line_col = "#888888")
-ggsave(paste0(plot_dir, "mod1_annual_diag_plot.jpg"),
-       plot = mod1_diag,
-       width = 20, height = 16, units = "cm", dpi = 300)
-
-mod2_diag <- appraise(mod2_k8, n_bins = 60, point_alpha = 0.05, line_col = "#117733")
-ggsave(paste0(plot_dir, "mod2_annual_diag_plot.jpg"),
-       plot = mod2_diag,
-       width = 20, height = 16, units = "cm", dpi = 300)
+# Diagnostic plots
+mod_diag_grass <- appraise(mod2_k12_grass, ci_alpha = 0.5, point_alpha = 0.05, n_bins = 50)
+mod_diag_shrub <- appraise(mod2_k12_shrub, ci_alpha = 0.5, point_alpha = 0.05, n_bins = 50)
+mod_diag_savanna <- appraise(mod2_k12_savanna, ci_alpha = 0.5, point_alpha = 0.05, n_bins = 50)
 
 
-# # Residual map
-# resid_raster <- df_model %>%
-#   mutate(resids = residuals(mod2_k16)) %>%
-#   select(x, y, resids) %>%
-#   rast(crs = "EPSG:4326")
-# 
-# resid_plot <- tm_shape(resid_raster) + 
-#   tm_raster(palette = "RdYlBu", style = "cont",
-#             breaks = c(-0.5, -0.25, 0, 0.25, 0.5),
-#             title = "Model residuals") +
-#   sa_basemap_2 +
-#   africa_basemap
-# 
-# tmap_save(resid_plot,
-#           paste0(plot_dir, "mod2_resid_map.jpg"),
-#           width = 16, height = 12, unit = "cm", dpi = 300)
+ggsave(here("results", "figures", "mod1_diag_grass.png"), mod_diag_grass,
+       width = 26.5, height = 22, units = "cm", dpi = 250)
+ggsave(here("results", "figures", "mod_diag_shrub.png"), mod_diag_shrub,
+       width = 26.5, height = 22, units = "cm", dpi = 250)
+ggsave(here("results", "figures", "mod_diag_savanna.png"), mod_diag_savanna,
+       width = 26.5, height = 22, units = "cm", dpi = 250)
 
 ```
 
@@ -707,6 +591,8 @@ Visualise binned models:
 
 ```{r binned_models_viz}
 
+target_vars <- c("pptAnomaly", "pptIntensity", "tMean", "soilN", "sand")
+
 # Load models and generate smooths
 # (Done in one step to avoid issues with keeping large models in memory)
 
@@ -762,13 +648,11 @@ theme_set(theme_classic())
 
 ## Binned GAM partial effect plots
 
-signif_vars <- c("pptAnomaly", "pptIntensity", "pptUgi", "tMean", "soilN", "sand")
-
 smooths_binned_pivot <- mod_smooths_binned_all %>%
   select(cover, map_bin, k,
-         all_of(signif_vars),
+         all_of(target_vars),
          est, se, ci_low, ci_high) %>%
-  pivot_longer(cols = all_of(signif_vars),
+  pivot_longer(cols = all_of(target_vars),
                names_to = "var", values_to = "value") %>%
   drop_na()
 
@@ -782,22 +666,18 @@ smooths_binned_merged <- smooths_binned_pivot %>%
 
 # Label lookup tables
 
-signif_var_labels <- c(
-  "'Precipitation anomaly'",
-  "Intensity~(mm~d^-1)",
-  "'Unranked Gini index'",
-  "'Mean air temperature (°C)'",
-  "'Soil nitrogen'~(g~kg^-2)",
-  "'Soil sand fraction (%)'"
-)
+var_labels <- read_csv(here("data", "raw", "csv", "var_labels_annual.csv"))
+
+target_var_labels <- var_labels %>%
+  filter(vars %in% target_vars)
 
 bin_labels <- c("'0-400'~mm~yr^-1",
                 "'400-800'~mm~yr^-1",
                 "'800-1,200'~mm~yr^-1")
 
 var_labels_df <- tibble(
-  var = signif_vars,
-  var_label = ordered(signif_var_labels, levels = signif_var_labels)
+  var = target_vars,
+  var_label = ordered(target_var_labels$label, levels = target_var_labels$label)
 )
 
 bin_labels_df <- tibble(
