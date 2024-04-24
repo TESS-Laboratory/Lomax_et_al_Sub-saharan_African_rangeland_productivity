@@ -108,20 +108,22 @@ igbp_mask <- mask(igbp, africa_vct)
 
 # Most common assigned IGBP class
 
-getMode <- function(x) {
-keys <- na.omit(unique(x))
-keys[which.max(tabulate(match(x, keys)))]
-}
-
-igbp_mode <- app(igbp_mask, getMode)
-
-# Write and read modal IGBP class layer (slow to calculate)
-writeRaster(igbp_mode, here("data", "processed", "raster",
-                            "igbp_mode.tif"),
-            overwrite = TRUE)
+# getMode <- function(x) {
+# keys <- na.omit(unique(x))
+# keys[which.max(tabulate(match(x, keys)))]
+# }
+# 
+# igbp_mode <- app(igbp_mask, getMode)
+# 
+# # Write and read modal IGBP class layer (slow to calculate)
+# writeRaster(igbp_mode, here("data", "processed", "raster",
+#                             "igbp_mode.tif"),
+#             overwrite = TRUE)
 
 igbp_mode <- rast(here("data", "processed", "raster",
                        "igbp_mode.tif"))
+
+igbp_mask <- igbp_mode %in% c(6:10)
 
 # Aridity index mask (include areas with 0.05 < ai > 0.65)
 ai_mask <- (ai > 500 & ai < 6500)
@@ -129,11 +131,14 @@ ai_mask <- (ai > 500 & ai < 6500)
 # ESA masks (exclude > 25% non-rangeland or > 50% tree cover)
 esa_mask <- (esa_other < 0.25) & (esa_tree < 0.5)
 
-# Combine masks
-study_area_mask <- igbp_mode & ai_mask & esa_mask & zero_mask
-
 # Annual season length mask (mask season length <= 0 or NA)
 season_mask <- season_length > 0
+
+all_season_mask <- sum(!is.na(season_mask)) > 0
+
+# Combine masks
+study_area_mask <- (igbp_mask & ai_mask & esa_mask & zero_mask & all_season_mask) %>%
+  mask(africa_vct)
 
 # Study area mask function
 sa_mask <- function(spatRaster, annual = FALSE) {
