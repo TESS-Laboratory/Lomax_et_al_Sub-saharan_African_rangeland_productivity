@@ -345,7 +345,7 @@ mod2_k16_savanna <- read_rds(here("data", "processed", "models", "mod2_k16_Open_
 
 ```{r term_plots}
 
-target_vars <- c("pptMean", "pptAnomaly", "tMean", "pptIntensity", "soilN", "sand")
+target_vars <- c("pptMean", "pptAnomaly", "pptIntensity", "tMean", "soilN", "sand")
 
 df_model_sample <- read_csv(here("data", "processed", "csv", "df_model_annual_sample.csv"))
 
@@ -487,6 +487,30 @@ ggsave(here("results", "figures", "mod_diag_shrub.png"), mod_diag_shrub,
        width = 26.5, height = 22, units = "cm", dpi = 250)
 ggsave(here("results", "figures", "mod_diag_savanna.png"), mod_diag_savanna,
        width = 26.5, height = 22, units = "cm", dpi = 250)
+
+# Concurvity plots
+cc_shrub <- concurvity(mod1_shrub, full = FALSE)
+cc_savanna <- concurvity(mod1_savanna, full = FALSE)
+cc_grass <- concurvity(mod1_grass, full = FALSE)
+
+save_corplot <- function(matrix, filename) {
+  png(paste0("results/figures/", filename),
+     height = 50, width = 50, units = "cm", res = 300)
+  
+  corrplot::corrplot(matrix, method = "number", type = "upper",
+                     tl.cex = 3, number.cex = 1.8, cl.cex = 2,
+                     is.corr = FALSE,
+                     col = viridis::magma(n = 20, begin = 0.3, end = 0.8)
+                     )
+  
+  while (!is.null(dev.list()))  dev.off()
+  
+}
+
+# Save plots (may need to run in terminal due to issue with running in R Markdown)
+save_corplot(cc_shrub$estimate, "cc_shrub.png")
+save_corplot(cc_savanna$estimate, "cc_savanna.png")
+save_corplot(cc_grass$estimate, "cc_grass.png")
 
 ```
 
