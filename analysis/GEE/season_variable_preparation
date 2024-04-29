@@ -1,17 +1,10 @@
 /**** Start of imports. If edited, may not auto-convert in the playground. ****/
-var chirps = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY"),
-    seasonality_ratio_asset = ee.Image("projects/ee-guylomax01/assets/africa_rangeland_precipitation_gpp/seasonality_ratio"),
-    season_dates_single_asset = ee.Image("projects/ee-guylomax01/assets/africa_rangeland_precipitation_gpp/season_dates_single"),
-    min_max_30 = ee.Image("projects/ee-guylomax01/assets/africa_rangeland_precipitation_gpp/cumulative_precipitation_min_max_30"),
-    min_max_60 = ee.Image("projects/ee-guylomax01/assets/africa_rangeland_precipitation_gpp/cumulative_precipitation_min_max_60"),
-    min_max_90 = ee.Image("projects/ee-guylomax01/assets/africa_rangeland_precipitation_gpp/cumulative_precipitation_min_max_90"),
-    season_dates_double_asset = ee.Image("projects/ee-guylomax01/assets/africa_rangeland_precipitation_gpp/season_dates_double"),
-    single_season_dates_annual = ee.Image("projects/ee-guylomax01/assets/africa_rangeland_precipitation_gpp/annual_dates_single"),
-    double_season_dates_annual = ee.Image("projects/ee-guylomax01/assets/africa_rangeland_precipitation_gpp/annual_dates_double");
+var chirps = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY");
 /***** End of imports. If edited, may not auto-convert in the playground. *****/
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////// Script to calculate the number, onset dates and cessation dates of African rainy seasons //////
-//////// based on CHIRPS daily precipitation data (2001-2019) //////////////////////////////////////////
+//////// based on CHIRPS daily precipitation data (2001-2019)///////////////////////////////////////////
+//////// This version does things on the basis of hydrological years, not calendar years ///////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 Map.setCenter(20, 0, 3);
@@ -24,19 +17,19 @@ Map.setCenter(20, 0, 3);
 ////// 1. Set geographic region and period for seasonal identification (2001-2019) //////
 /////////////////////////////////////////////////////////////////////////////////////////
 
-var africa_bbox = ee.Geometry.BBox(-18, -35, 52, 20);
+var africaBbox = ee.Geometry.BBox(-18, -35, 52, 20);
 
 // Dates for annual extraction of seasonal data
-var start_year = 2001;
-var end_year = 2019;
+var START_YEAR = 2001;
+var END_YEAR = 2019;
 
-var year_list = ee.List.sequence(start_year, end_year);
+var yearList = ee.List.sequence(START_YEAR, END_YEAR);
 
-var start_date = ee.Date.fromYMD(start_year, 1, 1);
-var end_date = ee.Date.fromYMD(end_year + 1, 1, 1);
+var startDate = ee.Date.fromYMD(START_YEAR, 1, 1);
+var endDate = ee.Date.fromYMD(END_YEAR + 1, 1, 1);
 
 // Record CHIRPS native CRS and scale for file export
-var chirps_proj = chirps.first().projection().getInfo();
+var chirpsProj = chirps.first().projection().getInfo();
 
 /////////////////////////////////////////////////////////////////////////
 ////// 2. Harmonic regression to calculate number of rainy seasons //////
@@ -44,7 +37,7 @@ var chirps_proj = chirps.first().projection().getInfo();
 /////////////////////////////////////////////////////////////////////////
 
 // Filter CHIRPS dataset to time window
-var chirps_filtered = chirps.filterDate(start_date, end_date);
+var chirpsFiltered = chirps.filterDate(startDate, endDate);
 
 // Helper function to add annual time variables and constant term to CHIRPS precipitation images
 var addVariables = function(image) {
@@ -55,16 +48,16 @@ var addVariables = function(image) {
     .addBands(ee.Image.constant(1));
 };
 
-var chirps_years = chirps_filtered.map(addVariables);
+var chirpsYears = chirpsFiltered.map(addVariables);
 
 // Independent variables (including first two harmonics to capture multiple seasons per year)
-var harmonic_independents = ee.List(['constant', 't', 'cos_1', 'sin_1', 'cos_2', 'sin_2']);
+var harmonicIndependents = ee.List(['constant', 't', 'cos_1', 'sin_1', 'cos_2', 'sin_2']);
 
 // Dependent variable - daily precipitation
 var dependent = ee.String("precipitation");
 
 // Add harmonic terms as bands
-var chirps_harmonic = chirps_years.map(function(image) {
+var chirpsHarmonic = chirpsYears.map(function(image) {
   var timeRadians = image.select('t').multiply(2 * Math.PI);
   var timeRadians2 = image.select('t').multiply(4 * Math.PI);
   return image
@@ -75,13 +68,15 @@ var chirps_harmonic = chirps_years.map(function(image) {
 });
 
 // Harmonic regression
-var chirps_harmonic_reg = chirps_harmonic
-  .select(harmonic_independents.add(dependent))
-  .reduce(ee.Reducer.linearRegression(harmonic_independents.length(), 1));
+var chirpsHarmonicReg = chirpsHarmonic
+  .select(harmonicIndependents.add(dependent))
+  .reduce(ee.Reducer.linearRegression(harmonicIndependents.length(), 1));
 
-var harmonic_coefficients = chirps_harmonic_reg.select('coefficients')
+var harmonicCoefficients = chirpsHarmonicReg.select('coefficients')
   .arrayProject([0])
-  .arrayFlatten([harmonic_independents]);
+  .arrayFlatten([harmonicIndependents]);
+
+print(harmonicCoefficients)
 
 //////////////////////////////////////////////////////////////////////////
 ////// 4. Calculate ratio of amplitudes of second to first harmonic //////
@@ -90,149 +85,228 @@ var harmonic_coefficients = chirps_harmonic_reg.select('coefficients')
 // Ratio > 1 suggests two rainy seasons per year
 
 // Calculate amplitudes as sqrt(cos^2 + sin^2) for each harmonic
-var harmonic_amplitudes = harmonic_coefficients
+var harmonicAmplitudes = harmonicCoefficients
   .expression("sqrt( pow(b('cos_1'), 2) + pow(b('sin_1'), 2) )").rename("amplitude_1")
-  .addBands(harmonic_coefficients
+  .addBands(harmonicCoefficients
     .expression("sqrt( pow(b('cos_2'), 2) + pow(b('sin_2'), 2) )").rename("amplitude_2"));
 
 // Calculate ratio of amplitudes
 // Ratio > 1 indicates two rainy seasons; ratio < 1 indicates single primary rainy season
-var amplitude_ratio = harmonic_amplitudes
-  .addBands(harmonic_amplitudes
+var seasonalityRatio = harmonicAmplitudes
+  .addBands(harmonicAmplitudes
     .select("amplitude_2")
-    .divide(harmonic_amplitudes
+    .divide(harmonicAmplitudes
       .select("amplitude_1"))
-    .rename("amplitude_ratio"));
+    .rename("seasonalityRatio"));
     
-print("Amplitude ratio", amplitude_ratio);
+print("Seasonality ratio", seasonalityRatio);
 
 // // Export to Earth Engine Asset at CHIRPS scale
 
 // Export.image.toAsset({
-//   image: amplitude_ratio,
-//   description: "seasonality_ratio",
-//   assetId: "africa_rangeland_precipitation_gpp/seasonality_ratio",
-//   region: africa_bbox,
-//   crs: chirps_proj.crs,
-//   crsTransform: chirps_proj.transform,
+//   image: seasonalityRatio,
+//   description: "seasonalityRatio",
+//   assetId: "africa_rangeland_precipitation_gpp/seasonalityRatio",
+//   region: africaBbox,
+//   crs: chirpsProj.crs,
+//   crsTransform: chirpsProj.transform,
 //   maxPixels: 1e9
 // });
+
+seasonalityRatio = ee.Image("projects/ee-guylomax01/assets/africa_rangeland_precipitation_gpp/seasonalityRatio");
 
 // Add to map
 // Blue = ratio < 1 (single season per year)
 // Green/red = ratio > 1 (multiple seasons per year)
 
 Map.addLayer(
-  seasonality_ratio_asset.select("amplitude_ratio"),
+  seasonalityRatio.select("amplitude_ratio"),
   {min: 0, max: 4, palette: ['#1f78b4', '#f7f7f7', '#b2df8a','#33a02c','#fb9a99','#e31a1c']},
   "Seasonality ratio");
 
 // Export to Drive
 Export.image.toDrive({
-  image: seasonality_ratio_asset,
-  description: "seasonality_ratio_to_drive",
+  image: seasonalityRatio,
+  description: "seasonalityRatioToDrive",
   folder: "season_variables",
-  fileNamePrefix: "seasonality_ratio",
-  region: africa_bbox,
-  crs: chirps_proj.crs,
-  crsTransform: chirps_proj.transform,
+  fileNamePrefix: "seasonalityRatio",
+  region: africaBbox,
+  crs: chirpsProj.crs,
+  crsTransform: chirpsProj.transform,
   maxPixels: 1e9
 });
+
 //////////////////////////////////////////////////////////////////////////
 ////// 5. Calculate cumulative precipitation anomaly for mean cycle //////
 //////////////////////////////////////////////////////////////////////////
 
 // Calculate average annual cycle
-var doy_list = ee.List.sequence(1, 365);
-var chirps_cycle = ee.ImageCollection(doy_list.map(function(doy) {
-  var chirps_day = chirps.filter(ee.Filter.calendarRange(doy, doy, "day_of_year"));
+var doyList = ee.List.sequence(1, 365);
+var chirpsCycle = ee.ImageCollection(doyList.map(function(doy) {
+  var chirpsDay = chirps.filter(ee.Filter.calendarRange(doy, doy, "day_of_year"));
   
-  return chirps_day.mean()
-                   .set("day_of_year", doy);
+  return chirpsDay.mean()
+                   .set("dayOfYear", doy);
 }));
 
-print("CHIRPS average annual cycle", chirps_cycle);
+print("CHIRPS average annual cycle", chirpsCycle);
 
 // Calculate mean daily precipitation
-var chirps_mean_daily_rainfall = chirps_cycle.mean();
+var chirpsMeanDailyRainfall = chirpsCycle.mean();
 
 // Calculate mean cumulative precipitation anomaly by day of year
-var chirps_cumulative_anomaly = ee.ImageCollection(
+var chirpsCumulativeAnomaly = ee.ImageCollection(
   ee.List(
     // Calculate cumulative anomaly through yearly cycle
-    chirps_cycle.iterate(function(today, anomaly_list) {
+    chirpsCycle.iterate(function(today, anomalyList) {
       
-      // Add day_of_year band and property to allow extraction of onset/cessation
-      var day_of_year = today.get("day_of_year");
-      var day_of_year_band = ee.Image.constant(day_of_year).rename("day_of_year").toInt();
+      // Add dayOfYear band and property to allow extraction of onset/cessation
+      var dayOfYear = today.get("dayOfYear");
+      var dayOfYearBand = ee.Image.constant(dayOfYear).rename("dayOfYear").toInt();
       
       // Update cumulative anomaly with daily anomaly
-      var today_anomaly = ee.Image(today).subtract(chirps_mean_daily_rainfall);
-      var total_to_yesterday = ee.Image(ee.List(anomaly_list).get(-1)).select(0);
-      var cumulative_anomaly = total_to_yesterday.add(today_anomaly)
-                                                           .addBands(day_of_year_band)
-                                                           .set("day_of_year", day_of_year);
+      var todayAnomaly = ee.Image(today).subtract(chirpsMeanDailyRainfall);
+      var totalToYesterday = ee.Image(ee.List(anomalyList).get(-1)).select(0);
+      var cumulativeAnomaly = totalToYesterday.add(todayAnomaly)
+                                                           .addBands(dayOfYearBand)
+                                                           .set("dayOfYear", dayOfYear);
       
       // Append cumulative anomaly to list
-      return ee.List(anomaly_list).add(cumulative_anomaly);
+      return ee.List(anomalyList).add(cumulativeAnomaly);
     },
     
     // Set initial dummy list - needs to be two images to allow function code to act on it as a list
-    ee.List([ee.Image.constant(0), ee.Image.constant(0).rename("precipitation_anomaly")])
+    ee.List([ee.Image.constant(0), ee.Image.constant(0).rename("precipitationAnomaly")])
     )
   ).slice(2));  // Remove initial dummy list
 
 // Add cumulative anomaly collection to map to allow spot checking with Inspector
 
-print("CHIRPS cumulative precipitation anomaly", chirps_cumulative_anomaly);
-
+print("CHIRPS cumulative precipitation anomaly", chirpsCumulativeAnomaly);
 Map.addLayer(
-  chirps_cumulative_anomaly.select(0),
-  {min: -500, max: 500, palette: ['#d53e4f','#f46d43','#fdae61','#fee08b','#ffffbf','#e6f598','#abdda4','#66c2a5','#3288bd']},
+  chirpsCumulativeAnomaly.select("precipitationAnomaly"),
+  {min: -100, max: 100},
   "Average cumulative rainfall anomaly",
-  false);
+  false
+);
 
 ///////////////////////////////////////////////////////////////////////
-////// 6. Calculate start and end dates for single-season pixels //////
+////// 6. Calculate mean hydrological year onset for all pixels ///////
 ///////////////////////////////////////////////////////////////////////
 
-// Create masks for single and double season pixels
-var single_season = seasonality_ratio_asset
-  .select("amplitude_ratio")
-  .lt(1);
-var double_season = single_season.eq(0);
+// Define hydrological year per pixel as 31 days before the mean minimum in
+// cumulative precipitation anomaly (i.e., 30 days before peak rainy season onset)
 
-// Calculate onset date (minimum cumulative anomaly + 1 day) and cessation date (maximum cumulative anomaly)
-var onset_date_single = chirps_cumulative_anomaly
+// First calculate overall rainy season onset date for whole study area
+// Calculate onset date (minimum cumulative anomaly + 1 day) and cessation/
+// date (maximum cumulative anomaly) for pixels with a single season
+
+var onsetDateAll = chirpsCumulativeAnomaly
   .reduce(ee.Reducer.min(2))
   .select(1)
-  .updateMask(single_season)
+  .add(1)    // Onset date considered to be day after min value
+  .rename("onset")
+  .toInt();
+
+var hYearStart = onsetDateAll
+  .add(365)
+  .subtract(30)
+  .mod(365);
+
+// Method above leaves some values as 0 rather than 365; need to manually change
+
+hYearStart = hYearStart.where(hYearStart.eq(0), 365);
+
+Export.image.toAsset({
+  image: hYearStart,
+  description: "hYearStartMean",
+  assetId: "africa_rangeland_precipitation_gpp/hYearStartMean",
+  region: africaBbox,
+  crs: chirpsProj.crs,
+  crsTransform: chirpsProj.transform,
+  maxPixels: 1e9
+});
+
+// Load asset if present
+hYearStart = ee.Image("projects/ee-guylomax01/assets/africa_rangeland_precipitation_gpp/hYearStartMean");
+
+Export.image.toDrive({
+  image: hYearStart,
+  description: "hYearStartMeanExport",
+  folder: "season_variables",
+  fileNamePrefix: "hYearStartMean",
+  region: africaBbox,
+  crs: chirpsProj.crs,
+  crsTransform: chirpsProj.transform,
+  maxPixels: 1e9
+});
+
+// Visualise on map
+Map.addLayer(
+  hYearStart,
+  {min: 0, max: 365, palette: ["red", "orange", "yellow", "green", "blue", "purple"]},
+  "Start of hydrological year"
+);
+
+///////////////////////////////////////////////////////////////////////////////
+////// 7. Calculate average start and end dates for single-season pixels //////
+///////////////////////////////////////////////////////////////////////////////
+
+// Create masks for single and double season pixels
+var singleSeason = seasonalityRatio
+  .select("amplitude_ratio")
+  .lt(1);
+var doubleSeason = singleSeason.eq(0);
+
+// Calculate onset date (minimum cumulative anomaly + 1 day) and cessation/
+// date (maximum cumulative anomaly) for pixels with a single season
+
+var onsetDateSingle = chirpsCumulativeAnomaly
+  .reduce(ee.Reducer.min(2))
+  .select(1)
+  .updateMask(singleSeason)
   .add(1)    // Onset date considered to be day after min value
   .rename("onset");
                                           
-var cessation_date_single = chirps_cumulative_anomaly
+var cessationDateSingle = chirpsCumulativeAnomaly
   .reduce(ee.Reducer.max(2))
   .select(1)
-  .updateMask(single_season)
+  .updateMask(singleSeason)
   .rename("cessation");
 
-var season_dates_single = onset_date_single.addBands(cessation_date_single);
+var seasonDatesSingle = onsetDateSingle
+  .addBands(cessationDateSingle)
+  .toInt();
 
-// // Export to Earth Engine Asset at CHIRPS scale
+// Export to Earth Engine Asset at CHIRPS scale
 
-// Export.image.toAsset({
-//   image: season_dates_single,
-//   description: "season_dates_single",
-//   assetId: "africa_rangeland_precipitation_gpp/season_dates_single",
-//   region: africa_bbox,
-//   crs: chirps_proj.crs,
-//   crsTransform: chirps_proj.transform,
-//   maxPixels: 1e9
-// });
+Export.image.toAsset({
+  image: seasonDatesSingle,
+  description: "seasonDatesSingle",
+  assetId: "africa_rangeland_precipitation_gpp/seasonDatesSingle",
+  region: africaBbox,
+  crs: chirpsProj.crs,
+  crsTransform: chirpsProj.transform,
+  maxPixels: 1e9
+});
 
-///////////////////////////////////////////////////////////////////////
-////// 7. Calculate start and end dates for double season pixels //////
-///////////////////////////////////////////////////////////////////////
+// Load asset if present
+seasonDatesSingle = ee.Image("projects/ee-guylomax01/assets/africa_rangeland_precipitation_gpp/seasonDatesSingle");
+
+Export.image.toDrive({
+  image: seasonDatesSingle,
+  description: "meanSeasonDatesSingleExport",
+  fileNamePrefix: "meanSeasonDatesSingle",
+  folder: "season_variables",
+  region: africaBbox,
+  crs: chirpsProj.crs,
+  crsTransform: chirpsProj.transform,
+  maxPixels: 1e9
+});
+
+///////////////////////////////////////////////////////////////////////////////
+////// 8. Calculate average start and end dates for double season pixels //////
+///////////////////////////////////////////////////////////////////////////////
 
 // Using method adapted from Dunning et al. 2016.
 // 1. Smooth the cumulative anomaly curve with a 30-day mean smoother
@@ -240,40 +314,40 @@ var season_dates_single = onset_date_single.addBands(cessation_date_single);
 
 // 30-day running mean smoother
 
-var chirps_cumulative_anomaly_smooth = ee.ImageCollection(
-  chirps_cumulative_anomaly.map(function(img) {
+var chirpsCumulativeAnomalySmooth = ee.ImageCollection(
+  chirpsCumulativeAnomaly.map(function(img) {
     
     var year = ee.Number(365);
-    var doy = ee.Number(img.get("day_of_year"));
-    var doy_band = img.select("day_of_year");
+    var doy = ee.Number(img.get("dayOfYear"));
+    var doyBand = img.select("dayOfYear");
     
     // Define smoothing window (30 days total, i.e. +/-15 days)
-    var smooth_window = ee.Number(15);
+    var smoothWindow = ee.Number(15);
     
     // Define window allowing for overlap between years
-    var lower_window = doy.add(year).subtract(smooth_window).mod(year);
-    var upper_window = doy.add(year).add(smooth_window).mod(year);
+    var lowerWindow = doy.add(year).subtract(smoothWindow).mod(year);
+    var upperWindow = doy.add(year).add(smoothWindow).mod(year);
     
     // Retrieve all anomaly images within local window
     // Apply different filter if window overlaps two calendar years using if statement
-    var filter = ee.Algorithms.If(doy.lte(smooth_window).or(doy.gte(year.subtract(smooth_window))),
-                                  ee.Filter.or(ee.Filter.gte("day_of_year", lower_window), ee.Filter.lte("day_of_year", upper_window)),
-                                  ee.Filter.and(ee.Filter.gte("day_of_year", lower_window), ee.Filter.lte("day_of_year", upper_window)));
+    var filter = ee.Algorithms.If(doy.lte(smoothWindow).or(doy.gte(year.subtract(smoothWindow))),
+                                  ee.Filter.or(ee.Filter.gte("dayOfYear", lowerWindow), ee.Filter.lte("dayOfYear", upperWindow)),
+                                  ee.Filter.and(ee.Filter.gte("dayOfYear", lowerWindow), ee.Filter.lte("dayOfYear", upperWindow)));
     
-    var local_images = chirps_cumulative_anomaly
+    var localImages = chirpsCumulativeAnomaly
       .filter(filter)
-      .select("precipitation_anomaly");
+      .select("precipitationAnomaly");
     
-    return local_images
+    return localImages
       .mean()
-      .addBands(doy_band)
+      .addBands(doyBand)
       .copyProperties(img);
 }));
 
-print("CHIRPS cumulative precipitation anomaly smoothed", chirps_cumulative_anomaly_smooth);
+print("CHIRPS cumulative precipitation anomaly smoothed", chirpsCumulativeAnomalySmooth);
 
 Map.addLayer(
-  chirps_cumulative_anomaly_smooth.select(0),
+  chirpsCumulativeAnomalySmooth.select(0),
   {min: -500, max: 500, palette: ['#d53e4f','#f46d43','#fdae61','#fee08b','#ffffbf','#e6f598','#abdda4','#66c2a5','#3288bd']},
   "Average cumulative rainfall anomaly - smoothed",
   false);
@@ -281,131 +355,136 @@ Map.addLayer(
 // Define function to extract local minima and maxima from cumulative anomaly curve for specified window length
 // Window value n means search n days either side (i.e. full window length of 2 * n)
 
-var find_local_minmax = function(IC, window) {
+var findLocalMinmax = function(IC, window) {
   var year = ee.Number(365);
   
-  var local_minmax = ee.ImageCollection(IC.map(function(img) {
+  var localMinmax = ee.ImageCollection(IC.map(function(img) {
     
-    var doy = ee.Number(img.get("day_of_year"));
+    var doy = ee.Number(img.get("dayOfYear"));
     
     // Define window (allowing for overlap between years)
-    var lower_window = doy.add(year).subtract(window).mod(year);
-    var upper_window = doy.add(year).add(window).mod(year);
+    var lowerWindow = doy.add(year).subtract(window).mod(year);
+    var upperWindow = doy.add(year).add(window).mod(year);
     
     // Retrieve all anomaly images within local window
     var filter = ee.Algorithms.If(doy.lt(window).or(doy.gte(year.subtract(window))),
-                                  ee.Filter.or(ee.Filter.gte("day_of_year", lower_window), ee.Filter.lte("day_of_year", upper_window)),
-                                  ee.Filter.and(ee.Filter.gte("day_of_year", lower_window), ee.Filter.lte("day_of_year", upper_window)));
+                                  ee.Filter.or(ee.Filter.gte("dayOfYear", lowerWindow), ee.Filter.lte("dayOfYear", upperWindow)),
+                                  ee.Filter.and(ee.Filter.gte("dayOfYear", lowerWindow), ee.Filter.lte("dayOfYear", upperWindow)));
     
     // Retrieve images
-    var local_images = IC.filter(filter);
+    var localImages = IC.filter(filter);
     
     // Find dates of local minimum and maximum of each rolling window
-    var local_min = local_images.reduce(ee.Reducer.min(2)).select(1);
-    var local_max = local_images.reduce(ee.Reducer.max(2)).select(1);
+    var localMin = localImages.reduce(ee.Reducer.min(2)).select(1);
+    var localMax = localImages.reduce(ee.Reducer.max(2)).select(1);
     
     // Test if each image is the local min or max
-    var is_min = img.select("day_of_year")
-                    .eq(local_min);
-    var is_max = img.select("day_of_year")
-                    .eq(local_max);
+    var isMin = img.select("dayOfYear")
+                    .eq(localMin);
+    var isMax = img.select("dayOfYear")
+                    .eq(localMax);
     
     // Mask pixels that are not local min or max
-    var local_min_only = local_min.updateMask(is_min);
-    var local_max_only = local_max.updateMask(is_max);
+    var localMinOnly = localMin.updateMask(isMin);
+    var localMaxOnly = localMax.updateMask(isMax);
   
-    return local_min_only.rename("local_min")
-            .addBands(local_max_only.rename("local_max"));
+    return localMinOnly.rename("localMin")
+            .addBands(localMaxOnly.rename("localMax"));
 }));
   
   // Calculate number and dates of identified minima/maxima
-  var number_of_minima = local_minmax.select("local_min").count().rename("number_of_minima");
-  var number_of_maxima = local_minmax.select("local_max").count().rename("number_of_maxima");
+  var numberOfMinima = localMinmax.select("localMin").count().rename("numberOfMinima");
+  var numberOfMaxima = localMinmax.select("localMax").count().rename("numberOfMaxima");
   
   // Return dates of minima and maxima as an array image
-  var min_dates = local_minmax.select("local_min")
-                              .toArray()
-                              .arraySort()
-                              .rename("minima");
-  var max_dates = local_minmax.select("local_max")
-                              .toArray()
-                              .arraySort()
-                              .rename("maxima");
+  var minDates = localMinmax.select("localMin")
+    .toArray()
+    .arraySort()
+    .rename("minima");
+  var maxDates = localMinmax.select("localMax")
+    .toArray()
+    .arraySort()
+    .rename("maxima");
   
-  return number_of_minima
-    .addBands(number_of_maxima)
-    .addBands(min_dates)
-    .addBands(max_dates);
+  return numberOfMinima
+    .addBands(numberOfMaxima)
+    .addBands(minDates)
+    .addBands(maxDates);
 };
 
 // Test fit for 30-day, 60-day and 90-day windows
-var local_minmax_90 = find_local_minmax(chirps_cumulative_anomaly_smooth, 45);
-var local_minmax_60 = find_local_minmax(chirps_cumulative_anomaly_smooth, 30);
-var local_minmax_30 = find_local_minmax(chirps_cumulative_anomaly_smooth, 15);
+var localMinmax90 = findLocalMinmax(chirpsCumulativeAnomalySmooth, 45);
+var localMinmax60 = findLocalMinmax(chirpsCumulativeAnomalySmooth, 30);
+var localMinmax30 = findLocalMinmax(chirpsCumulativeAnomalySmooth, 15);
 
-print("Double season maxima/minima", local_minmax_90, local_minmax_60, local_minmax_30);
+print("Double season maxima/minima", localMinmax90, localMinmax60, localMinmax30);
 
 // Convert array image to bands of min and max values
 // Extract the two array bands and convert to six-band image of maxima and minima 
-var band_names = [["first", "second", "third"], ["min", "max"]];
+var bandNames = [["first", "second", "third"], ["min", "max"]];
 
-var precipitation_min_max_90 = local_minmax_90.select(["minima", "maxima"])  // Extract the two array bands containing maxima/minima dates
+var precipitationMinMax90 = localMinmax90.select(["minima", "maxima"])  // Extract the two array bands containing maxima/minima dates
                                               .arrayPad([3, 1])              // Pad with zeroes to make all arrays 3x1 dimensions
                                               .arraySlice(0, 0, 3)           // Limit array to max 3 values
                                               .toArray(1)                    // Concatenate both 3x1 arrays to a single 3x2 array
-                                              .arrayFlatten(band_names);     // Extract 3x2 array values as separate band names
+                                              .arrayFlatten(bandNames);     // Extract 3x2 array values as separate band names
 
-var precipitation_min_max_60 = local_minmax_60.select(["minima", "maxima"])
+var precipitationMinMax60 = localMinmax60.select(["minima", "maxima"])
                                               .arrayPad([3, 1])
                                               .arraySlice(0, 0, 3)
                                               .toArray(1)
-                                              .arrayFlatten(band_names);
+                                              .arrayFlatten(bandNames);
 
-var precipitation_min_max_30 = local_minmax_30.select(["minima", "maxima"])
+var precipitationMinMax30 = localMinmax30.select(["minima", "maxima"])
                                               .arrayPad([3, 1])
                                               .arraySlice(0, 0, 3)
                                               .toArray(1)
-                                              .arrayFlatten(band_names);
+                                              .arrayFlatten(bandNames);
 
 // // Export to Earth Engine Asset at CHIRPS scale
 // Export.image.toAsset({
-//   image: precipitation_min_max_90,
-//   description: "cumulative_precipitation_min_max_90",
-//   assetId: "africa_rangeland_precipitation_gpp/cumulative_precipitation_min_max_90",
-//   region: africa_bbox,
-//   crs: chirps_proj.crs,
-//   crsTransform: chirps_proj.transform,
+//   image: precipitationMinMax90,
+//   description: "cumulativePrecipitationMinMax90",
+//   assetId: "africa_rangeland_precipitation_gpp/PrecipitationMinMax90",
+//   region: africaBbox,
+//   crs: chirpsProj.crs,
+//   crsTransform: chirpsProj.transform,
 //   maxPixels: 1e9
 // });
 
 // Export.image.toAsset({
-//   image: precipitation_min_max_60,
-//   description: "cumulative_precipitation_min_max_60",
-//   assetId: "africa_rangeland_precipitation_gpp/cumulative_precipitation_min_max_60",
-//   region: africa_bbox,
-//   crs: chirps_proj.crs,
-//   crsTransform: chirps_proj.transform,
+//   image: precipitationMinMax60,
+//   description: "cumulativePrecipitationMinMax60",
+//   assetId: "africa_rangeland_precipitation_gpp/PrecipitationMinMax60",
+//   region: africaBbox,
+//   crs: chirpsProj.crs,
+//   crsTransform: chirpsProj.transform,
 //   maxPixels: 1e9
 // });
 
 // Export.image.toAsset({
-//   image: precipitation_min_max_30,
-//   description: "cumulative_precipitation_min_max_30",
-//   assetId: "africa_rangeland_precipitation_gpp/cumulative_precipitation_min_max_30",
-//   region: africa_bbox,
-//   crs: chirps_proj.crs,
-//   crsTransform: chirps_proj.transform,
+//   image: precipitationMinMax30,
+//   description: "cumulativePrecipitationMinMax30",
+//   assetId: "africa_rangeland_precipitation_gpp/PrecipitationMinMax30",
+//   region: africaBbox,
+//   crs: chirpsProj.crs,
+//   crsTransform: chirpsProj.transform,
 //   maxPixels: 1e9
 // });
+
+// Load assets if present
+precipitationMinMax90 = ee.Image("projects/ee-guylomax01/assets/africa_rangeland_precipitation_gpp/precipitationMinMax90");
+precipitationMinMax60 = ee.Image("projects/ee-guylomax01/assets/africa_rangeland_precipitation_gpp/precipitationMinMax60");
+precipitationMinMax30 = ee.Image("projects/ee-guylomax01/assets/africa_rangeland_precipitation_gpp/precipitationMinMax30");
 
 // Create mosaic layers of mean maxima/minima, starting with 90-day window and
 // decreasing until I get four dates (two seasons).
 
 // Function to map over bands to create mask image
-var double_season_mask = function(img) {
-  var is_season_img = img.neq(0);
+var doubleSeasonMask = function(img) {
+  var isSeasonImg = img.neq(0);
   
-  var mask = is_season_img
+  var mask = isSeasonImg
     .reduce(ee.Reducer.sum())
     .eq(4);
   
@@ -414,290 +493,233 @@ var double_season_mask = function(img) {
 
 // Create mosaic running from long to short windows
 
-var double_season_mosaic = ee.ImageCollection(
-  [double_season_mask(min_max_90),
-  double_season_mask(min_max_60),
-  double_season_mask(min_max_30)]
+var doubleSeasonMosaic = ee.ImageCollection(
+  [doubleSeasonMask(precipitationMinMax90),
+  doubleSeasonMask(precipitationMinMax60),
+  doubleSeasonMask(precipitationMinMax30)]
   )
   .mosaic()
-  .updateMask(single_season.neq(1))
+  .updateMask(singleSeason.neq(1))
   .select([0,1,2,3])  // Drop additional empty bands
   .add([1,0,1,0]);    // Add 1 to minimum dates to reach onset
 
 // Sort dates, pairing seasons by date (using Array Images)
 // First create logical for whether one season overlaps calendar year
 
-var season_overlap = double_season_mosaic.expression("(b(0) + b(2)) > (b(1) + b(3))");
+var seasonOverlap = doubleSeasonMosaic.expression("(b(0) + b(2)) > (b(1) + b(3))");
 
-// Array image that adds 365 to "first_max" value if season_overlap is TRUE
-var overlap_image = ee.Image.constant([0,365,0,0])
-  .multiply(season_overlap)
+// Array image that adds 365 to "firstMax" value if seasonOverlap is TRUE
+var overlapImage = ee.Image.constant([0,365,0,0])
+  .multiply(seasonOverlap)
   .toArray();
 
-var double_season_array = double_season_mosaic
+var doubleSeasonArray = doubleSeasonMosaic
   .toArray()
-  .add(overlap_image)
+  .add(overlapImage)
   .arraySort();
 
 // Retrieve dates as bands
 
-var double_season_dates = double_season_array
-  .arrayFlatten([["onset1", "cessation1", "onset2", "cessation2"]]);
+var seasonDatesDouble = doubleSeasonArray
+  .arrayFlatten([["onset1", "cessation1", "onset2", "cessation2"]])
+  .toInt();
 
-print("double_season_dates", double_season_dates);
+print("doubleSeasonDates", seasonDatesDouble);
 
 // // Export to Earth Engine Asset at CHIRPS scale
 
-// Export.image.toAsset({
-//   image: double_season_dates,
-//   description: "season_dates_double",
-//   assetId: "africa_rangeland_precipitation_gpp/season_dates_double",
-//   region: africa_bbox,
-//   crs: chirps_proj.crs,
-//   crsTransform: chirps_proj.transform,
-//   maxPixels: 1e9
-// });
+Export.image.toAsset({
+  image: seasonDatesDouble,
+  description: "seasonDatesDouble",
+  assetId: "africa_rangeland_precipitation_gpp/seasonDatesDouble",
+  region: africaBbox,
+  crs: chirpsProj.crs,
+  crsTransform: chirpsProj.transform,
+  maxPixels: 1e9
+});
+
+// Load asset if present
+seasonDatesDouble = ee.Image("projects/ee-guylomax01/assets/africa_rangeland_precipitation_gpp/seasonDatesDouble");
+
+Export.image.toDrive({
+  image: seasonDatesDouble.toInt(),
+  description: "meanSeasonDatesDoubleExport",
+  fileNamePrefix: "meanSeasonDatesDouble",
+  folder: "season_variables",
+  region: africaBbox,
+  crs: chirpsProj.crs,
+  crsTransform: chirpsProj.transform,
+  maxPixels: 1e9
+});
 
 // Add to map 
-var season_vis_params = {
+var seasonVisParams = {
   min: 1, 
   max: 720
 };
 
-Map.addLayer(season_dates_single_asset, season_vis_params, "Single season dates", false);
-Map.addLayer(double_season_dates, season_vis_params, "Double season dates", false);
+Map.addLayer(seasonDatesSingle, seasonVisParams, "Single season dates", false);
+Map.addLayer(seasonDatesDouble, seasonVisParams, "Double season dates", false);
 
+///////////////////////////////////////////////////////////////////////////
+////// 10. Onset and cessation dates per year - single season pixels //////
+///////////////////////////////////////////////////////////////////////////
 
-/////////////////////////////////////////////////////////////////////////////////////
-////// 8. Calculate total season length for single- and multiple-season pixels //////
-/////////////////////////////////////////////////////////////////////////////////////
-
-// Single season pixels
-var season_length_single = season_dates_single_asset.select("cessation")
-  .subtract(season_dates_single_asset.select("onset"))
-  .add(365)
-  .mod(365)
-  .rename("season_length");
-
-// Double season pixels
-var season_length_double = season_dates_double_asset
-  .expression("(b('cessation1') + b('cessation2')) - (b('onset1') + b('onset2'))")
-  .rename("season_length");
-  
-// Merge into a single layer
-
-var season_length_all = season_length_single
-  .blend(season_length_double)
-  .toInt();
-print("season length", season_length_all);
-
-Map.addLayer(
-  season_length_all,
-  {
-    min: 60,
-    max: 240,
-    palette: ['#ffffcc','#c7e9b4','#7fcdbb','#41b6c4','#1d91c0','#225ea8','#0c2c84']
-  },
-  "Total rainy season length");
-
-// Export to Drive
-Export.image.toDrive({
-  image: season_length_all,
-  description: "season_length_all_to_drive",
-  folder: "season_variables",
-  fileNamePrefix: "season_length_all",
-  region: africa_bbox,
-  crs: chirps_proj.crs,
-  crsTransform: chirps_proj.transform,
-  maxPixels: 1e9
-});
-
-//////////////////////////////////////////////////////////////////////////
-////// 9. Onset and cessation dates per year - single season pixels //////
-//////////////////////////////////////////////////////////////////////////
-
-// Recalculate the cumulative anomaly from Ds-60 to Ds+305 days, where Ds is the
-// average date of onset (i.e., one hydrological year)
-// For cessation date, calculate from Ds-60 to the end of the hydrological year
-// (Ds+305) and find cumulative maximum.
-// For each year, use the average precipitation value for that hydrological year,
-// rather than a global value, to avoid failures when precipitation is anomalously low.
+// To calculate annual start and end dates, we need to use the hydrological year
+// For each hYear, we recalculate the anomaly for a 365-day window running from 30 days before
+// the start of the hYear to 30 days before the end (should capture start and end of rainy season).
+// Anomaly is calculated using the precipitation value for that hydrological year,
+// rather than the long-term value, to ensure start and end dates are found in
+// years of low rainfall.
 
 // Steps:
 // 1. Filter CHIRPS daily images for each year, including y-1 and y+1 to allow overlap
-// 2. For each pixel, calculate Ds-60, Ds, Ds+60 and Ds + 305 (from chirps_cycle)
-// 3. Calculate the average daily rainfall in that hydrological year, and add as a layer
-//    to all images in the collection running from 1 (Jan 1st of y-1) to 1095 (Dec 31st of y+1).
-//    If a leap year is present, cut off the final day.
-// 4. Filter to keep only layers with 315 < D < 780.
-// 5. Create onset and cessation masks for each pixel, where pixels outside the hydrological
-//    year are set to zero.
-// 6. Calculate cumulative anomaly for the range of pixels, and identify the min (for onset)
+// 2. Calculate the average daily rainfall in the hydrological year for each pixel,
+//    and add as a layer to all images in the collection.
+// 3. Filter to keep only days within the hYear range.
+// 4. Create an hYear mask for each pixel, where pixels outside the range are masked
+// 5. Calculate cumulative anomaly for the range of pixels, and identify the min (for onset)
 //    or the max (cessation).
 
-var annual_dates_single = ee.ImageCollection(year_list.map(function(y) {
+var annualDatesSingle = ee.ImageCollection(yearList.map(function(y) {
   
-  // Mean seasonal onset and cessation dates for single seasons
-  var onset = season_dates_single_asset.select("onset");
-  var cessation = season_dates_single_asset.select("cessation");
+  // Retrieve CHIRPS images from 60 days before start of calendar year to 1 year after end
+  y = ee.Number(y);
+  var yearStart = ee.Date.fromYMD(y, 1, 1);
+  var d1 = yearStart.advance(-60, "days");
+  var d2 = yearStart.advance(2, "year");
   
-  // Retrieve chirps_values for +/- 1 year to allow overlap
-  y = ee.Number(y).toInt();
-  var chirps_years = chirps.filter(ee.Filter.calendarRange(y.subtract(1), y.add(1), "year"));
+  var chirpsYearList = chirps
+    .filterDate(d1, d2);
   
   // Assign day number to each image in filtered CHIRPS data and add as band
-  // Reduce calculation by excluding days more than 60 days before the start of year or
-  // more than 180 days into the next year (need to capture seasons that start in e.g. December)
-  var chirps_year_list = chirps_years.toList(605, 305);   // Exclude first 305 images and include the next 605
-  
-  var chirps_year_numbered = ee.ImageCollection(chirps_year_list
+  var chirpsYearNumbered = ee.ImageCollection(chirpsYearList
     .map(function(img) {
-      var day = chirps_year_list.indexOf(img).add(306);   // Add 305 (excluded images) + 1 (to offset zero-based index)
-      var day_band = ee.Image.constant(day)
+      var day = ee.Date(img.get("system:time_start")).difference(yearStart, "days");
+      var dayBand = ee.Image.constant(day)
         .toInt()
         .rename("day");
       
       return ee.Image(img)
         .set("day", day)
-        .addBands(day_band);
+        .addBands(dayBand);
   }));
   
-  // Create hydrological year mask for each pixel starting 60 days before mean onset date
   // Search window for maxima/minima
-  var window = 60;
-  
-  // Start and end of hydrological year
-  var hyear_start = onset.add(365).subtract(window);
-  var hyear_end = hyear_start.add(365);
+  var window = 0;
   
   // Define masks
-  var chirps_year_masked = chirps_year_numbered.map(function(img) {
+  var chirpsYearMasked = chirpsYearNumbered.map(function(img) {
   
     var day = img.select("day");
+    
+    var hYearDay = day
+      .subtract(hYearStart)
+      .rename("hYearDay");
   
     // Define hydrological year mask
-    var hyear_mask = day.gte(hyear_start)
-                        .and(day.lte(hyear_end))
-                        .rename("hyear_mask");
+    var hYearMaskStart = hYearDay
+      .add(window)
+      .gte(0);
+    var hYearMaskEnd = hYearDay
+      .subtract(window)
+      .lte(365);
+    var hYearMask = hYearMaskStart
+      .and(hYearMaskEnd)
+      .rename("hYearMask");
     
     // Set rainfall outside hyear to zero (not masked, as masking would prevent cumulative sum)
-    var chirps_rainfall_hyear = img.multiply(hyear_mask);
+    var chirpsRainfallHyear = img.multiply(hYearMask);
     
     // Add layers as additional bands
-    return chirps_rainfall_hyear
-      .addBands(hyear_mask)
-      .addBands(day);
+    return chirpsRainfallHyear
+      .addBands(hYearMask)
+      .addBands(hYearDay);
   });
   
   // Mean daily rainfall per pixel for this hydrological year
-  
-  var hyear_mean_daily_rainfall = ee.ImageCollection(chirps_year_masked)
+    var hyearMeanDailyRainfall = chirpsYearMasked
     .select("precipitation")
     .sum()
-    .divide(365);
+    .divide(365 + window * 2);
   
   // Calculate cumulative anomaly across hydrological year
-  var chirps_cumulative_anomaly = ee.ImageCollection(
+  var chirpsCumulativeAnomaly = ee.ImageCollection(
   ee.List(
     // Calculate running anomaly through yearly cycle
-    chirps_year_masked.iterate(function(today, anomaly_list) {
+    chirpsYearMasked.iterate(function(today, anomalyList) {
       
-      // Add day_of_year band and property to allow extraction of onset/cessation
-      var day = today.get("day");
-      var day_band = today.select("day");
+      // Add dayOfHYear band to allow extraction of onset/cessation
+      var dayBand = today.select("hYearDay");
       
       // Extract mask band as layer
-      var hyear_mask = today.select("hyear_mask");
+      var hyearMask = today.select("hYearMask");
       
       // Update cumulative anomaly with daily anomaly
-      var today_anomaly = ee.Image(today)
+      var todayAnomaly = ee.Image(today)
         .select("precipitation")
-        .subtract(hyear_mean_daily_rainfall);
+        .subtract(hyearMeanDailyRainfall);
       
-      var hyear_anomaly = today_anomaly
-        .multiply(hyear_mask)                // Set to zero if masked
-        .rename("hyear_anomaly");
+      var hyearAnomaly = todayAnomaly
+        .multiply(hyearMask)                // Set to zero if masked
+        .rename("hyearAnomaly");
       
-      var total_to_yesterday = ee.Image(ee.List(anomaly_list).get(-1)).select("hyear_anomaly");
-      var cumulative_anomaly = total_to_yesterday.add(hyear_anomaly)
-                                                .addBands(day_band)
-                                                .set("day", day);
+      var totalToYesterday = ee.Image(ee.List(anomalyList).get(-1)).select("hyearAnomaly");
+      var cumulativeAnomaly = totalToYesterday.add(hyearAnomaly)
+                                                .addBands(dayBand);
       
       // Append cumulative anomaly to list
-      return ee.List(anomaly_list).add(cumulative_anomaly);
+      return ee.List(anomalyList).add(cumulativeAnomaly);
     },
     
     // Set initial dummy list - needs to be two images to allow function code to act on it as a list
-    ee.List([ee.Image.constant(0), ee.Image.constant(0).rename("hyear_anomaly")])
+    ee.List([ee.Image.constant(0), ee.Image.constant(0).rename("hyearAnomaly")])
     )
   ).slice(2));  // Remove initial dummy list
   
   // Calculate date of minimum for this year per pixel
-  var onset_anomaly = chirps_cumulative_anomaly
+  var onsetAnomaly = chirpsCumulativeAnomaly
     .reduce(ee.Reducer.min(2))                              // Retain both bands
     .select(1)                                              // Select day band
     .add(1)                                                 // Onset date considered to be day after min value
     .rename("onset");
   
-  var cessation_anomaly = chirps_cumulative_anomaly
+  var cessationAnomaly = chirpsCumulativeAnomaly
     .reduce(ee.Reducer.max(2))
     .select(1)
     .rename("cessation");
   
-  return onset_anomaly
-    .addBands(cessation_anomaly)
-    .subtract(365)                                          // Convert back to day of year
-    .set("system:index", ee.String("Y").cat(ee.String(y)));
+  var imgName = ee.String("Y").cat(ee.String(y).slice(0,4));
+  return onsetAnomaly
+    .addBands(cessationAnomaly)                                       // Convert back to day of year
+    .set("system:index", imgName);
   
 }));
 
-print("Annual season dates - single", annual_dates_single);
+print("Annual season dates - single", annualDatesSingle);
 
-// // Export to Earth Engine Asset at CHIRPS scale
-// var annual_dates_single_bands = annual_dates_single.toBands();
-
-// Export.image.toAsset({
-//   image: annual_dates_single_bands,
-//   description: "annual_dates_single",
-//   assetId: "africa_rangeland_precipitation_gpp/annual_dates_single",
-//   region: africa_bbox,
-//   crs: chirps_proj.crs,
-//   crsTransform: chirps_proj.transform,
-//   maxPixels: 1e9
-// });
+var annualDatesSingleBands = annualDatesSingle.toBands();
 
 // Export to Drive
 Export.image.toDrive({
-  image: single_season_dates_annual.toInt(),
-  description: "annual_dates_single_to_drive",
+  image: annualDatesSingleBands.toInt(),
+  description: "annualDatesSingleExport",
   folder: "season_variables",
-  fileNamePrefix: "season_annual_dates_single",
-  region: africa_bbox,
-  crs: chirps_proj.crs,
-  crsTransform: chirps_proj.transform,
+  fileNamePrefix: "annualSeasonDatesSingleHYear",
+  region: africaBbox,
+  crs: chirpsProj.crs,
+  crsTransform: chirpsProj.transform,
   maxPixels: 1e9
 });
 
-print("Annual single season onset/cessation dates", single_season_dates_annual);
-Map.addLayer(single_season_dates_annual, {min: 0, max: 365}, "Annual season dates - single");
-
-// // Add onset and cessation dates for first year to map
-// Map.addLayer(
-//   single_season_dates_annual,
-//   {bands: "Y2001_onset", min: -60, max: 425},
-//   "Annual onset 2018");
-
-// Map.addLayer(
-//   single_season_dates_annual,
-//   {bands: "Y2001_cessation", min: 0, max: 485},
-//   "Annual cessation 2018");
+print("Annual single season onset/cessation dates", annualDatesSingle);
 
 //////////////////////////////////////////////////////////////////////////
-////// 10. Onset and cessation dates per year - double season pixels //////
+////// 11. Onset and cessation dates per year - double season pixels //////
 //////////////////////////////////////////////////////////////////////////
 
 // 1. As for the single season, then map over years to find annual maxima/minima.
-//    Filter to all values within 120 days before/after the year. Then create
+//    Filter to all values within 30 days before/after the hydrological year. Then create
 //    a series of hydrological "seasons" (rather than years), in which the search
 //    window runs from 45 days before onset to 45 days after cessation.
 // 2. For each of these windows, create a new mask that sets all other precipitation
@@ -708,250 +730,197 @@ Map.addLayer(single_season_dates_annual, {min: 0, max: 365}, "Annual season date
 
 // Map over years to retreive season onset and cessation dates
 
-var annual_dates_double = ee.ImageCollection(year_list.map(function(y) {
+var annualDatesDouble = ee.ImageCollection(yearList.map(function(y) {
+
+  // Retrieve CHIRPS images from 60 days before start of calendar year to 1 year after end
+  y = ee.Number(y);
+  var yearStart = ee.Date.fromYMD(y, 1, 1);
+  var d1 = yearStart.advance(-60, "days");
+  var d2 = yearStart.advance(2, "year");
   
-  // Mean seasonal onset and cessation dates for single seasons
-  var onset1 = season_dates_double_asset.select("onset1");
-  var onset2 = season_dates_double_asset.select("onset2");
-  var cessation1 = season_dates_double_asset.select("cessation1");
-  var cessation2 = season_dates_double_asset.select("cessation2");
+  var chirpsYear = chirps
+    .filterDate(d1, d2);
   
-  // Retrieve chirps_values for +/- 1 year (to allow overlap)
-  y = ee.Number(y).toInt();
-  var chirps_years = chirps.filter(ee.Filter.calendarRange(y.subtract(1), y.add(1), "year"));
-  
-  // Assign day number to each image in filtered CHIRPS data and add as band
-  // Reduce calculation by excluding days more than 60 days before the start of year or
-  // more than 120 days into the next year (need to capture seasons that start in e.g. December)
-  var chirps_year_list = chirps_years.toList(545, 305);   // Include image 306 (year - 60) to 850 (year + 120)
-  
-  var chirps_year_numbered = ee.ImageCollection(chirps_year_list
+  // Assign day in hYear number to each image in filtered CHIRPS data and add as band
+  var chirpsYearNumbered = chirpsYear
     .map(function(img) {
-      var day = chirps_year_list.indexOf(img).add(306);   // Add 305 (excluded images) + 1 (to offset zero-based index)
-      var day_band = ee.Image.constant(day)
+      var day = ee.Date(img.get("system:time_start")).difference(yearStart, "days");
+      var dayBand = ee.Image.constant(day)
         .toInt()
         .rename("day");
       
       return ee.Image(img)
         .set("day", day)
-        .addBands(day_band);
-  }));
+        .addBands(dayBand);
+  });
+  
+  // Mean seasonal onset and cessation dates for single seasons relative to hYear start  
+  var seasonDatesDoubleHYear = seasonDatesDouble
+    .add(365)
+    .subtract(hYearStart)
+    .mod(365);
+
+  var onset1 = seasonDatesDoubleHYear.select("onset1");
+  var onset2 = seasonDatesDoubleHYear.select("onset2");
+  var cessation1 = seasonDatesDoubleHYear.select("cessation1");
+  var cessation2 = seasonDatesDoubleHYear.select("cessation2");
   
   // Create seasonal masks for both seasons (from n days before/after season onset/cessation)
   // I can adjust the window to maximise detection and reduce confusion between seasons
   // Search window for maxima/minima
   var window = 45;
   
-  // Start and end of seasonal windows
-  var s1_start = onset1.add(365).subtract(window);
-  var s1_end = cessation1.add(365).add(window);
-  var s2_start = onset2.add(365).subtract(window);
-  var s2_end = cessation2.add(365).add(window);
-  
-  // Define masks
-  var chirps_year_masked = chirps_year_numbered.map(function(img) {
-  
-    var day = img.select("day");
-  
-    // Define seasonal_masks
-    var s1_mask = day.gte(s1_start)
-                        .and(day.lte(s1_end))
-                        .rename("s1_mask");
-    var s2_mask = day.gte(s2_start)
-                        .and(day.lte(s2_end))
-                        .rename("s2_mask");
+  // Define masks for seasons
+  var chirpsYearMasked = chirpsYearNumbered.map(function(img) {
     
-    // Set rainfall outside season to zero (not masked, as masking would prevent cumulative sum)
-    var chirps_rainfall_s1 = img
-      .select("precipitation")
-      .multiply(s1_mask)
-      .rename("s1_precip");
-    var chirps_rainfall_s2 = img
-      .select("precipitation")
-      .multiply(s2_mask)
-      .rename("s2_precip");
+    var precipitation = img.select("precipitation");
+    var day = img.select("day");
+    
+    var hYearDay = day
+      .subtract(hYearStart)
+      .rename("hYearDay");
+  
+    // Define season masks for each season
+    var season1MaskStart = hYearDay
+      .add(window)
+      .gte(onset1);
+    var season1MaskEnd = hYearDay
+      .subtract(window)
+      .lte(cessation1);
+    var season1Mask = season1MaskStart
+      .and(season1MaskEnd)
+      .rename("season1Mask");
+    
+    var season2MaskStart = hYearDay
+      .add(window)
+      .gte(onset2);
+    var season2MaskEnd = hYearDay
+      .subtract(window)
+      .lte(cessation2);
+    var season2Mask = season2MaskStart
+      .and(season2MaskEnd)
+      .rename("season2Mask");
+    
+    // Set rainfall outside hyear to zero (not masked, as masking would prevent cumulative sum)
+    var chirpsRainfallSeason1 = precipitation
+      .multiply(season1Mask)
+      .rename("season1Precipitation");
+    var chirpsRainfallSeason2 = precipitation
+      .multiply(season2Mask)
+      .rename("season2Precipitation");
     
     // Add layers as additional bands
-    return chirps_rainfall_s1
-      .addBands(chirps_rainfall_s2)
-      .addBands(s1_mask)
-      .addBands(s2_mask)
-      .addBands(day);
+    return ee.Image([
+      chirpsRainfallSeason1, chirpsRainfallSeason2,
+      season1Mask, season2Mask,
+      hYearDay
+    ]);
   });
   
   // Mean daily rainfall per pixel for each season
   
-  var mean_daily_rainfall = ee.ImageCollection(chirps_year_masked)
-    .select(["s1_precip", "s2_precip"])
+  var seasonLengths = ee.Image([cessation1.subtract(onset1), cessation2.subtract(onset2)])
+    .rename("seasonLength1", "seasonLength2")
+    .add(window * 2);
+
+  var meanDailyRainfall = chirpsYearMasked
+    .select(["season1Precipitation", "season2Precipitation"])
     .sum()
-    .divide([s1_end.subtract(s1_start), s2_end.subtract(s2_start)]);
+    .divide(seasonLengths);
   
   // Calculate cumulative anomaly for onset and cessation dates
-  var chirps_cumulative_anomaly = ee.ImageCollection(
+  var chirpsCumulativeAnomaly = ee.ImageCollection(
   ee.List(
     // Calculate running anomaly through yearly cycle
-    chirps_year_masked.iterate(function(today, anomaly_list) {
+    chirpsYearMasked.iterate(function(today, anomalyList) {
       
-      // Add day_of_year band and property to allow extraction of onset/cessation
-      var day = today.get("day");
-      var day_band = today.select("day");
+      // Add dayOfYear band and property to allow extraction of onset/cessation
+      var dayBand = today.select("hYearDay");
       
       // Extract mask bands as layers
-      var s_mask = today.select(["s1_mask", "s2_mask"]);
+      var sMask = today.select(["season1Mask", "season2Mask"]);
       
       // Update cumulative anomaly with daily anomaly
-      var today_anomaly = ee.Image(today)
-        .select(["s1_precip", "s2_precip"])
-        .subtract(mean_daily_rainfall);
+      var todayAnomaly = ee.Image(today)
+        .select(["season1Precipitation", "season2Precipitation"])
+        .subtract(meanDailyRainfall);
       
-      var season_anomaly = today_anomaly
-        .multiply(s_mask)                // Set to zero if masked
-        .rename(["s1_anomaly", "s2_anomaly"]);
+      var seasonAnomaly = todayAnomaly
+        .multiply(sMask)                // Set to zero if masked
+        .rename(["season1Anomaly", "season2Anomaly"]);
       
-      var total_to_yesterday = ee.Image(ee.List(anomaly_list).get(-1))
-        .select(["s1_anomaly", "s2_anomaly"]);
-      var cumulative_anomaly = total_to_yesterday.add(season_anomaly)
-        .addBands(day_band)
-        .set("day", day);
+      var totalToYesterday = ee.Image(ee.List(anomalyList).get(-1))
+        .select(["season1Anomaly", "season2Anomaly"]);
+      var cumulativeAnomaly = totalToYesterday.add(seasonAnomaly)
+        .addBands(dayBand);
       
       // Append cumulative anomaly to list
-      return ee.List(anomaly_list).add(cumulative_anomaly);
+      return ee.List(anomalyList).add(cumulativeAnomaly);
     },
     
     // Set initial dummy list - needs to be two images to allow function code to act on it as a list (GEE quirk)
-    ee.List([ee.Image.constant(0), ee.Image.constant([0,0]).rename(["s1_anomaly", "s2_anomaly"])])
+    ee.List([ee.Image.constant(0), ee.Image.constant([0,0]).rename(["season1Anomaly", "season2Anomaly"])])
     )
   ).slice(2));
   
   // Calculate date of minimum for this year per pixel
-  var onset1_anomaly = chirps_cumulative_anomaly
-    .select(["s1_anomaly", "day"])
+  var onset1Anomaly = chirpsCumulativeAnomaly
+    .select(["season1Anomaly", "hYearDay"])
     .reduce(ee.Reducer.min(2))                              // Retain both bands
     .select(1)                                              // Select day band
     .add(1)                                                 // Onset date considered to be day after min value
     .rename("onset1");
   
-  var cessation1_anomaly = chirps_cumulative_anomaly
-    .select(["s1_anomaly", "day"])
+  var cessation1Anomaly = chirpsCumulativeAnomaly
+    .select(["season1Anomaly", "hYearDay"])
     .reduce(ee.Reducer.max(2))
     .select(1)
     .rename("cessation1");
 
-  var onset2_anomaly = chirps_cumulative_anomaly
-    .select(["s2_anomaly", "day"])
+  var onset2Anomaly = chirpsCumulativeAnomaly
+    .select(["season2Anomaly", "hYearDay"])
     .reduce(ee.Reducer.min(2)) 
     .select(1)
     .add(1)
     .rename("onset2");
   
-  var cessation2_anomaly = chirps_cumulative_anomaly
-    .select(["s2_anomaly", "day"])
+  var cessation2Anomaly = chirpsCumulativeAnomaly
+    .select(["season2Anomaly", "hYearDay"])
     .reduce(ee.Reducer.max(2))
     .select(1)
     .rename("cessation2");
   
-  return onset1_anomaly
-    .addBands(cessation1_anomaly)
-    .addBands(onset2_anomaly)
-    .addBands(cessation2_anomaly)
-    .subtract(365)
-    .set("system:index", ee.String("Y").cat(ee.String(y)));
+  return onset1Anomaly
+    .addBands(cessation1Anomaly)
+    .addBands(onset2Anomaly)
+    .addBands(cessation2Anomaly)
+    .set("system:index", ee.String("Y").cat(ee.String(y).slice(0,4)));
 }));
 
-print("annual season dates - double", annual_dates_double);
+print("Annual season dates - double", annualDatesDouble);
 
-var annual_dates_double_bands = annual_dates_double.toBands();
-
-// // Export to Earth Engine Asset at CHIRPS scale
-
-// Export.image.toAsset({
-//   image: annual_dates_double_bands,
-//   description: "annual_dates_double",
-//   assetId: "africa_rangeland_precipitation_gpp/annual_dates_double",
-//   region: africa_bbox,
-//   crs: chirps_proj.crs,
-//   crsTransform: chirps_proj.transform,
-//   maxPixels: 1e9
-// });
-
-// Export to Drive
-Export.image.toDrive({
-  image: double_season_dates_annual.toInt(),  /////////////////////////////////////////
-  description: "annual_dates_double_to_drive",
-  folder: "season_variables",
-  fileNamePrefix: "season_annual_dates_double",
-  region: africa_bbox,
-  crs: chirps_proj.crs,
-  crsTransform: chirps_proj.transform,
-  maxPixels: 1e9
-});
-
-print("Annual double season onset/cessation dates", double_season_dates_annual);
-Map.addLayer(double_season_dates_annual, {min: 0, max: 365}, "Annual season dates - double");
-
-//////////////////////////////////////////////////////////////////////
-////// 11. Calculate and export annual deviation from mean date //////
-//////////////////////////////////////////////////////////////////////
-
-// Create ImageCollection of repeated mean annual onset/cessation dates
-// Need to add 365 to cessation dates for seasons overlapping calendar year
-
-var overlap_single = season_dates_single_asset.select("onset")
-  .gt(season_dates_single_asset.select("cessation"));
-var season_dates_single_overlap = season_dates_single_asset
-  .add(ee.Image.constant([0, 365]).multiply(overlap_single));
-
-var season_dates_single_repeat = ee.ImageCollection(
-  ee.List.repeat(
-    season_dates_single_overlap, year_list.size())
-    )
-  .toBands()
-  .toInt();
-  
-var overlap_double = season_dates_double_asset.select("onset2")
-  .gt(season_dates_double_asset.select("cessation2"));
-var season_dates_double_overlap = season_dates_double_asset
-  .add(ee.Image.constant([0, 0, 0, 365]).multiply(overlap_double));
-
-var season_dates_double_repeat = ee.ImageCollection(
-  ee.List.repeat(
-    season_dates_double_asset, year_list.size())
-    )
+var annualDatesDoubleBands = annualDatesDouble
   .toBands()
   .toInt();
 
-// Subtract mean dates from specific annual dates ()
-var season_deviation_single = single_season_dates_annual
-  .subtract(season_dates_single_repeat)
-  .toInt();
-
-var season_deviation_double = double_season_dates_annual
-  .subtract(season_dates_double_repeat)
-  .toInt();
-
-Map.addLayer(season_deviation_single, {min: -60, max: 60}, "Single season annual deviations");
-Map.addLayer(season_deviation_double, {min: -60, max: 60}, "Double season annual deviations");
-
 // Export to Drive
-
 Export.image.toDrive({
-  image: season_deviation_single,
-  description: "season_deviation_single_to_drive",
+  image: annualDatesDoubleBands.toInt(),  /////////////////////////////////////////
+  description: "annualDatesDoubleExport",
   folder: "season_variables",
-  fileNamePrefix: "season_deviation_single",
-  region: africa_bbox,
-  crs: chirps_proj.crs,
-  crsTransform: chirps_proj.transform,
+  fileNamePrefix: "annualSeasonDatesDoubleHYear",
+  region: africaBbox,
+  crs: chirpsProj.crs,
+  crsTransform: chirpsProj.transform,
   maxPixels: 1e9
 });
 
-Export.image.toDrive({
-  image: season_deviation_double,
-  description: "season_deviation_double_to_drive",
-  folder: "season_variables",
-  fileNamePrefix: "season_deviation_double",
-  region: africa_bbox,
-  crs: chirps_proj.crs,
-  crsTransform: chirps_proj.transform,
+Export.image.toAsset({
+  image: annualDatesDoubleBands.toInt(),  /////////////////////////////////////////
+  description: "annualDatesDoubleAsset",
+  assetId: "africa_rangeland_precipitation_gpp/annualDatesDouble",
+  region: africaBbox,
+  crs: chirpsProj.crs,
+  crsTransform: chirpsProj.transform,
   maxPixels: 1e9
 });

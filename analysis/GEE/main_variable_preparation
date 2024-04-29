@@ -1,556 +1,688 @@
 /**** Start of imports. If edited, may not auto-convert in the playground. ****/
 var chirps = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY"),
     pmlv2 = ee.ImageCollection("projects/pml_evapotranspiration/PML/OUTPUT/PML_V2_8day_v016"),
-    era5 = ee.ImageCollection("ECMWF/ERA5_LAND/MONTHLY"),
-    modis_lst = ee.ImageCollection("MODIS/006/MOD11A2"),
-    modis_burn = ee.ImageCollection("MODIS/006/MCD64A1"),
-    isda_n = ee.Image("ISDASOIL/Africa/v1/nitrogen_total"),
-    isda_p = ee.Image("ISDASOIL/Africa/v1/phosphorus_extractable"),
-    isda_sand = ee.Image("ISDASOIL/Africa/v1/sand_content"),
-    isda_clay = ee.Image("ISDASOIL/Africa/v1/clay_content");
+    era5 = ee.ImageCollection("ECMWF/ERA5_LAND/DAILY_AGGR"),
+    modisBurn = ee.ImageCollection("MODIS/006/MCD64A1"),
+    sand = ee.Image("ISDASOIL/Africa/v1/sand_content"),
+    clay = ee.Image("ISDASOIL/Africa/v1/clay_content"),
+    soilN = ee.Image("ISDASOIL/Africa/v1/nitrogen_total"),
+    soilP = ee.Image("ISDASOIL/Africa/v1/phosphorus_extractable");
 /***** End of imports. If edited, may not auto-convert in the playground. *****/
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////// Script to calculate and export key non-seasonal variables for Africa rangeland GAM analysis //////
+//////// This version calculates and exports yearly variables rather than annual ones /////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 //// Guy Lomax
-//// 2023-05-31
+//// 2023-09-25
 //// G.Lomax@exeter.ac.uk
 /////////////////////////////////////////////////////////////////////////////////////////
 ////// 1. Set geographic region and period for seasonal identification (2001-2019) //////
 /////////////////////////////////////////////////////////////////////////////////////////
-var africa_bbox = ee.Geometry.BBox(-18, -35, 52, 20);
+var AFRICA_BBOX = ee.Geometry.BBox(-18, -35, 52, 20);
 // Dates for annual extraction of seasonal data
-var start_year = 2001;
-var end_year = 2019;
-var year_list = ee.List.sequence(start_year, end_year);
-var start_date = ee.Date.fromYMD(start_year, 1, 1);
-var end_date = ee.Date.fromYMD(end_year + 1, 1, 1);
-// Record CHIRPS native CRS and scale for file export
-var chirps_proj = chirps.first().projection().getInfo();
-/////////////////////////////////////////////////////////
-////// 2. Calculate annual GPP from PML_V2 dataset //////
-/////////////////////////////////////////////////////////
-var gpp_annual = ee.ImageCollection(year_list.map(function(y) {
-  y = ee.Number(y);
-  var gpp_year = pmlv2
-    .select("GPP")
-    .filter(ee.Filter.calendarRange(y, y, "year"));
-  
-  // PMLV2 GPP data in units of g C m-2 d-1 for 8-day time steps. To get total GPP, need to
-  // multiply by number of days per image (8 for all except the last image of the year, which needs to be calculated)
-  var gpp_last = gpp_year.sort("system:time_start", false).first();
-  var gpp_others = gpp_year.limit(45, "system:time_start");   // 45 complete 8-day periods per year
-  
-  var year_days = ee.Date.fromYMD(y.add(1), 1, 1).difference(ee.Date.fromYMD(y, 1, 1), "days");   // 365 or 366 days in a year
-  var last_segment_days = year_days.mod(8);   // number of days in final segment
-  
-  var gpp_sum = gpp_others.sum().multiply(8)
-    .add(gpp_last.multiply(last_segment_days));
-  
-  return gpp_sum
-    .set("year", y)
-    .toFloat();
-}));
-print("PML_V2 annual GPP values", gpp_annual);
-// Additional mask for pixels with all zero-values (artefacts of land use classification)
-var zero_mask = gpp_annual
-  .map(function(img) {
-    return img.eq(0);
+var startYear = 2001;
+var endYear = 2019;
+var yearList = ee.List.sequence(startYear, endYear);
+var startDate = ee.Date.fromYMD(startYear, 1, 1);
+var endDate = ee.Date.fromYMD(endYear + 2, 1, 1);
+var chirpsProj = chirps.first().projection().getInfo();
+// Define helper function to generate band names for variables
+var getBandNames = function(variable, list) {
+  var names = ee.List(list).map(function(y) {
+    y = ee.String(y).replace("\\.0", "");
+    return ee.String(variable)
+      .cat("_")
+      .cat(y);
+  });
+  return names;
+};
+////////////////////////////////////////////////////////////////////////////////
+////// 2. Create multiband image of hydrological year dates for filtering //////
+////////////////////////////////////////////////////////////////////////////////
+// Layers of hYear start and end dates
+var hYearStart = ee.Image("projects/ee-guylomax01/assets/africa_rangeland_precipitation_gpp/hYearStartMean")
+  .rename("hYearStart");
+var hYearEnd = hYearStart
+  .add(365)
+  .rename("hYearEnd");
+// Create multiband image of values 1-731 (max number of days in 2 years)
+var daysIn2Years = ee.List.sequence(1, 731);
+var daysIn2YearsImg = ee.ImageCollection(
+  daysIn2Years.map(function(n) {
+    return ee.Image.constant(n)
+    .toInt()
+    .rename("day")
+    .set("day", n);
   })
-  .min()
-  .eq(1);
-var pmlv2_proj = pmlv2.first().projection().getInfo();
-// // Export zero mask to Earth Engine Asset (see script "study_area_masks")
-// Export.image.toAsset({
-//   image: zero_mask,
-//   description: "pmlv2_zero_mask",
-//   assetId: "africa_rangeland_precipitation_gpp/pmlv2_zero_mask",
-//   region: africa_bbox,
-//   crs: pmlv2_proj.crs,
-//   crsTransform: pmlv2_proj.transform,
-//   maxPixels: 1e9
-// });
-// Calculate mean values over study period
-var gpp_mean = gpp_annual.mean();
-var gpp_mean_resample = gpp_mean
+).toBands();
+print(daysIn2YearsImg);
+// Convert values to day in hydrological year for each pixel
+var dayInHYearImg = daysIn2YearsImg
+  .subtract(hYearStart);
+// Mask values outside hydrological year
+var hYearImg = dayInHYearImg
+  .updateMask(dayInHYearImg.gte(0))
+  .updateMask(dayInHYearImg.lt(365))
+  .rename(getBandNames("day", daysIn2Years));
+print(hYearImg)
+Map.addLayer(hYearStart, {min: 30, max: 330, palette: ["red", "orange", "yellow", "green", "blue", "purple"]}, "Date of hYear start")
+Map.addLayer(hYearImg.select([365]), {min: 0, max: 365, palette: ["red", "orange", "yellow", "green", "blue", "purple"]}, "Day in HYear for 31st Dec")
+Export.image.toAsset({
+  image: hYearImg,
+  description: "hYearImgMask",
+  assetId: "africa_rangeland_precipitation_gpp/hYearImgMask",
+  crs: chirpsProj.crs,
+  crsTransform: chirpsProj.transform,
+  region: AFRICA_BBOX,
+  maxPixels: 1e9
+});
+hYearImg = ee.Image("projects/ee-guylomax01/assets/africa_rangeland_precipitation_gpp/hYearImgMask");
+/////////////////////////////////////////////////////////
+////// 3. Calculate annual GPP from PML_V2 dataset //////
+/////////////////////////////////////////////////////////
+// Add dateRange to all PML_V2 images (include end date)
+// Need to manually extract end times as start times of subsequent image
+// as they are not present in the original data
+// Extract system times as list
+var gppDates = pmlv2
+  .aggregate_array("system:time_start")
+  .slice(0, pmlv2.size());
+// Add entry for end date of last image
+var seriesEndDate = ee.Date("2021-01-01");
+var gppDatesExtended = gppDates.add(seriesEndDate.millis());
+// Map over image collection to add date range
+var gppWithDates = pmlv2
+  .select("GPP")
+  .map(function(img) {
+    img = ee.Image(img);
+    
+    var systemTimeStart = img.get("system:time_start");
+    var systemTimeEnd = gppDatesExtended
+      .get(gppDates.indexOf(systemTimeStart).add(1));
+    
+    var duration = ee.Date(systemTimeEnd)
+      .difference(ee.Date(systemTimeStart), "days");
+    
+    return img
+    .set("system:time_end", systemTimeEnd,
+         "duration", duration);
+});
+print(gppWithDates);
+var daysInPeriod = ee.List.sequence(
+  1,
+  endDate.difference(startDate, "days"));
+print(daysInPeriod);
+var gppDaily = ee.ImageCollection(daysInPeriod.map(function(d) {
+  d = ee.Number(d);
+  
+  var day = startDate.advance(d, "days");
+  
+  var dateFilter = ee.Filter.and(
+      ee.Filter.greaterThanOrEquals({
+        leftValue: day.millis(),
+        rightField: "system:time_start"
+      }),
+      ee.Filter.lessThan({
+        leftValue: day.millis(),
+        rightField: "system:time_end"
+      }));
+      
+  var gppDay = gppWithDates
+      .filter(dateFilter)
+      .first();
+      
+  return gppDay
+    .set("system:time_start", day.millis());
+}));
+// Calculate GPP for hYear per pixel
+// GPP data is a daily rate for periods of 5-8 days, so need to multiply  
+var gppAnnual8Day = ee.ImageCollection(yearList.map(function(y) {
+  y = ee.Number(y);
+  
+  var d1 = ee.Date.fromYMD(y, 1, 1);
+  var d2 = d1.advance(2, "years");
+  
+  var gppYears = gppWithDates
+    .filterDate(d1, d2);
+  
+  // Multiply daily GPP of each image by number of days it intersects with the hYear
+  var gppHYearIntersection = gppYears.map(function(img) {
+    img = ee.Image(img);
+    
+    var startDoy = ee.Date(img.get("system:time_start"))
+      .difference(d1, "days")
+      .add(1);
+    
+    var endDoy = ee.Date(img.get("system:time_end"))
+      .difference(d1, "days")
+      .add(1);
+    
+    var startDoyImg = ee.Image(startDoy)
+      .rename("startDay")
+      .toInt();
+    
+    var endDoyImg = ee.Image(endDoy)
+      .rename("endDay")
+      .toInt();
+    
+    // Calculate days that this image overlaps with the hydrological year for each pixel
+    var overlapStart = endDoyImg.subtract(hYearStart);
+    var overlapEnd = hYearEnd.subtract(startDoyImg);
+    var imgDuration = ee.Image.constant(img.get("duration"))
+      .rename("duration")
+      .toInt();
+    
+    // Sum each image by the number of days of overlap it has with the hYear
+    // Formula is max(0, min(overlapStart, overlapEnd, imgDuration)
+    // i.e.
+    // Case 1 - Image does not overlap with hYear - Multiply by zero
+    // Case 2 - Image partially overlaps at start or end - Multiply by number of days of overlap
+    // Case 3 - Image fully within hYear - Multiply by total duration of image (5, 6 or 8 days)
+    
+    var intersectionDays = ee.Image([overlapStart, imgDuration, overlapEnd])
+      .reduce(ee.Reducer.min());
+    
+    var intersectionDaysGt0 = ee.Image.constant(0)
+      .addBands(intersectionDays)
+      .reduce(ee.Reducer.max());
+    
+    var intersectionGPP = img.multiply(intersectionDaysGt0);
+    
+    return intersectionGPP
+      .copyProperties(img, ["system:time_start", "system:time_end"]);
+  });
+  
+  var gppHYearSum = gppHYearIntersection
+    .sum()
+    .rename("gpp");
+  
+  return gppHYearSum
+    .set("system:time_start", d1.millis(),
+         "year", y);
+}));
+print("Annual GPP from raw images", gppAnnual8Day);
+// Convert to image with bands
+var gppAnnualBands = gppAnnual8Day
+  .toBands()
+  .rename(getBandNames("gpp", yearList));
+// Export intermediate image at original resolution (memory errors when also reprojecting)
+var pmlProj = pmlv2.first().projection().getInfo();
+Export.image.toAsset({
+  image: gppAnnualBands,
+  description: "gppAnnualAsset",
+  assetId: "africa_rangeland_precipitation_gpp/gppAnnual",
+  region: AFRICA_BBOX,
+  crs: pmlProj.crs,
+  crsTransform: pmlProj.transform,
+  maxPixels: 1e9
+});
+gppAnnualBands = ee.Image("projects/ee-guylomax01/assets/africa_rangeland_precipitation_gpp/gppAnnual");
+// Reproject to CHIRPS resolution and export as image
+var gppAnnualReproject = gppAnnualBands
+  .setDefaultProjection(pmlv2.first().projection())
   .reduceResolution({
     reducer: ee.Reducer.mean(),
     maxPixels: 1024
   })
-  .reproject({
-    crs: chirps_proj.crs,
-    crsTransform: chirps_proj.transform
+  .toFloat();
+print(gppAnnualReproject);
+Export.image.toDrive({
+  image: gppAnnualReproject,
+  description: "gppAnnualExport",
+  folder: "annual_variables",
+  fileNamePrefix: "gppAnnual",
+  region: AFRICA_BBOX,
+  crs: chirpsProj.crs,
+  crsTransform: chirpsProj.transform,
+  maxPixels: 1e9
 });
 /////////////////////////////////////////////////////////////
 ////// 3. Calculate precipitation average annual cycle //////
 /////////////////////////////////////////////////////////////
 // Filter to study period
-var chirps_filtered = chirps.filterDate(start_date, end_date);
+var chirpsFiltered = chirps.filterDate(startDate, endDate);
 // Average annual cycle
-var doy_list = ee.List.sequence(1, 365);
-var chirps_cycle = ee.ImageCollection(doy_list.map(function(doy) {
-  var chirps_day = chirps.filter(ee.Filter.calendarRange(doy, doy, "day_of_year"));
+var doyList = ee.List.sequence(1, 365);
+var chirpsCycle = ee.ImageCollection(doyList.map(function(doy) {
+  var chirpsDay = chirps.filter(ee.Filter.calendarRange(doy, doy, "day_of_year"));
   
-  return chirps_day.mean()
-                   .set("day_of_year", doy);
+  return chirpsDay.mean()
+                  .set("day_of_year", doy);
 }));
-print("Average annual precipitation cycle", chirps_cycle);
-/////////////////////////////////////////////////////////////////////////////
-////// 4. Calculate annual precipitation and metrics (mean, SD and CV) //////
-/////////////////////////////////////////////////////////////////////////////
-// Annual precipitation totals
-var annual_precip = ee.ImageCollection(year_list.map(function(y) {
-  var chirps_images = chirps.filter(ee.Filter.calendarRange(y, y, "year"));
+print("Average annual precipitation cycle", chirpsCycle);
+////////////////////////////////////////////////////////////////////////////////
+////// 4. Process daily precipitation images to represent consistent days //////
+////// in the hydrological year for all pixels /////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+// Generate a 365-day Image Collection for each hydrological year in the dataset
+var annualPptHYear = yearList.map(function(y) {
+  y = ee.Number(y);
   
-  return chirps_images.sum()
-                      .set("year", y);
+  var d1 = ee.Date.fromYMD(y, 1, 1);
+  var d2 = d1.advance(2, "years");
+  
+  var pptYears = chirps
+    .filterDate(d1, d2)
+    .toList(731);
+  
+  // Mask daily ppt by whether each day falls within hYear using masked hYearImg
+  
+  var pptHYear = ee.ImageCollection(pptYears.map(function(img) {
+    
+    img = ee.Image(img);
+    
+    var dayIndex = pptYears.indexOf(img);
+    var dohy = hYearImg.select(dayIndex);
+    
+    var imgHYearMasked = img.updateMask(dohy.gte(0));
+    
+    return imgHYearMasked.set("dayindex", dayIndex);
+  }));
+  // Convert Image Collection to 2D array (dimensions 365 * 1)
+  // Masked values (outside hYear) are dropped
+  var pptHYearArray = pptHYear
+    .toArray()
+    .arrayTranspose();
+  
+  // Convert array image back to banded image
+  var dayNames = getBandNames("day", ee.List.sequence(1, 365));
+  var arrayBandNames = [["precipitation"], dayNames];
+  
+  var pptHYearBands = pptHYearArray.arrayFlatten(arrayBandNames);
+  // Convert back to Image Collection
+    var dayList = ee.List.sequence(0, 364);
+  
+  var pptHYearCol = ee.ImageCollection(dayList.map(function(d) {
+    d = ee.Number(d);
+    
+    return pptHYearBands
+      .select(d)
+      .rename("precipitation")
+      .set("day", d.add(1));
+  }));
+  
+  return pptHYearCol.set("hYear", y);
+});
+print("Annual hYear cycle", annualPptHYear);
+print("HYear cycle - 2001", annualPptHYear.get(0));
+///////////////////////////////////////////////////////
+////// 5. Calculate annual precipitation metrics //////
+///////////////////////////////////////////////////////
+////// Total precipitation
+var pptTotal = ee.ImageCollection(annualPptHYear.map(function(ic) {
+  ic = ee.ImageCollection(ic);
+  return ic
+    .sum()
+    .rename("precipitationSum")
+    .copyProperties(ic);
 }));
-print("Total annual precipitation", annual_precip);
-// Inter-annual metrics
-var map = annual_precip.mean();
-var sd = annual_precip.reduce(ee.Reducer.stdDev());
-var cv = sd.divide(map).multiply(100);
-Map.addLayer(map, {min: 0, max: 3000, palette: ['#ffffcc','#a1dab4','#41b6c4','#2c7fb8','#253494']}, "MAP");
-Map.addLayer(sd, {min: 0, max: 500, palette: ['#edf8fb','#b3cde3','#8c96c6','#8856a7','#810f7c']}, "SD");
-Map.addLayer(cv, {min: 0, max: 80, palette: ['#ffffb2','#fecc5c','#fd8d3c','#f03b20','#bd0026']}, "CV");
-////////////////////////////////////////////////////////////
-////// 5. Calculate precipitation variability metrics //////
-////////////////////////////////////////////////////////////
-//// 5a. Fraction of dry days per year
-var chirps_dry_days = ee.ImageCollection(year_list.map(function(y) {
-  var chirps_year = chirps.filter(ee.Filter.calendarRange(y, y, "year"));
+// var pptMean = pptTotal
+//   .mean()
+//   .rename("precipitationMean");
+// var pptAnomaly = pptTotal.map(function(img) {
+//   img = ee.Image(img);
   
-  var dry_days = chirps_year.map(function(img) {return img.lt(1)})
-                            .sum();
-  return dry_days.divide(chirps_year.size())
-                .toFloat()
-                .set("year", y, "days_in_year", chirps_year.size());
-}));
-var dry_days_mean = chirps_dry_days.mean();
-print("Number of dry days", chirps_dry_days);
-Map.addLayer(chirps_dry_days,
-            {min: 0, max: 1, palette: ['#ffffb2','#fecc5c','#fd8d3c','#f03b20','#bd0026']},
-            "F_dry days");
-//// 5b. Precipitation intensity - total precipitation divided by number of rainy days per year
-var intensity = ee.ImageCollection(year_list.map(function(y) {
-  var chirps_year = chirps.filter(ee.Filter.calendarRange(y, y, "year"));
+//   return img
+//     .divide(pptMean)
+//     .rename("precipitationAnomaly")
+//     .copyProperties(img);
+// });
+////// Precipitation timing
+var pptMeanDay = ee.ImageCollection(annualPptHYear.map(function(ic) {
+  ic = ee.ImageCollection(ic);
   
-  var wet_days = chirps_year
-    .map(function(img) {return img.gt(0)})
-    .sum();
-  var chirps_total = chirps_year.sum();
+  var pptTotal = ic.sum();
   
-  return chirps_total.divide(wet_days);
-}));
-Map.addLayer(intensity,
-            {min: 0, max: 100, palette: ['#8c510a','#d8b365','#f6e8c3','#f5f5f5','#c7eae5','#5ab4ac','#01665e']},
-            "Precip intensity");
-var intensity_mean = intensity.mean();
-//// 5c. Number of days per year where precipitation exceeds a fixed threshold
-var threshold = 10;   // Edit threshold for different variables
-var chirps_exceed_threshold = ee.ImageCollection(year_list.map(function(y) {
-  var chirps_year = chirps_filtered.filter(ee.Filter.calendarRange(y, y, "year"));
-  
-  var exceed_threshold = chirps_year.map(function(img) {
-    return img.gte(threshold);
-  }).sum();
-  
-  return exceed_threshold;
-})).mean();
-//// 5d. Percentile indices - fraction of total rainfall occurring in events larger than long-term percentile
-var percentile = 95;
-// Calculate long-term percentile value per pixel (all days)
-var percentile_value = chirps_filtered.reduce(
-  ee.Reducer.percentile({
-    percentiles: [percentile],
-    outputNames: ["ppt_percentile"]
-}));
-// Fraction exceeding long-term percentile (all days)
-var mean_percentile_fraction = ee.ImageCollection(year_list.map(function(y) {
-  var chirps_year = chirps_filtered.filter(ee.Filter.calendarRange(y, y, "year"));
-  
-  var total_precip = chirps_year.sum();
-  
-  var precip_gte_percentile = chirps_year.map(function(img) {
-    var is_greater = img.gte(percentile_value);
-    return img
-      .multiply(is_greater);
-  }).sum();
-  
-  var fraction_gte_percentile = precip_gte_percentile
-    .divide(total_precip);
-  
-  return fraction_gte_percentile;
-})).mean();
-print(mean_percentile_fraction);
-Map.addLayer(mean_percentile_fraction, {min: 0, max: 1, palette: ['#edf8fb','#bfd3e6','#9ebcda','#8c96c6','#8c6bb1','#88419d','#6e016b']}, "Fraction greater than 95th percentile");
-// Calculate long-term percentile value per pixel (wet days only)
-var chirps_wet_only = chirps_filtered
-  .map(function(img) {
-    var wet_mask = img.gte(1);
-    return img.updateMask(wet_mask);
+  var icDayProd = ic.map(function(img) {
+    img = ee.Image(img);
+    
+    var day = ee.Number(img.get("day"));
+    
+    return img.multiply(day);
   });
   
-var wet_percentile_value = chirps_wet_only
-  .reduce(
-    ee.Reducer.percentile({
-      percentiles: [percentile],
-      outputNames: ["ppt_percentile"]
+  var icMeanDay = icDayProd
+    .sum()
+    .divide(pptTotal)
+    .rename("pptMeanDay");
+  
+  return icMeanDay
+    .copyProperties(ic);
 }));
-var mean_wet_percentile_fraction = ee.ImageCollection(year_list.map(function(y) {
-  var chirps_year = chirps_wet_only.filter(ee.Filter.calendarRange(y, y, "year"));
+// var pptMeanDayAnomaly = pptMeanDay.map(function(img) {
+//   img = ee.Image(img);
   
-  var total_precip = chirps_year.sum();
+//   return img
+//     .subtract(pptMeanDay.mean())
+//     .rename("pptMeanDayAnomaly")
+//     .copyProperties(img);
+// });
+// Precipitation intensity
+var pptIntensity = ee.ImageCollection(annualPptHYear.map(function(ic) {
+  ic = ee.ImageCollection(ic);
   
-  var precip_gte_percentile = chirps_year.map(function(img) {
-    var is_greater = img.gte(wet_percentile_value);
-    return img
-      .multiply(is_greater);
+  var wetDays = ic.map(function(img) {
+    img = ee.Image(img);
+    return img.gt(0);
   }).sum();
   
-  var fraction_gte_percentile = precip_gte_percentile
-    .divide(total_precip);
+  var pptSum = ic.sum();
   
-  return fraction_gte_percentile;
-})).mean();
-//// 5e. Unranked GINI index of rainfall
-// Define function to operate on one year of daily rainfall data as ImageCollection
-var calc_ugi = function(IC) {
+  return pptSum
+    .divide(wetDays)
+    .rename("pptIntensity")
+    .copyProperties(ic);
+}));
+////// Fraction of dry days
+var pptDryDays = ee.ImageCollection(annualPptHYear.map(function(ic) {
+  ic = ee.ImageCollection(ic);
+  
+  var dryDays = ic
+    .map(function(img) {return img.lt(1)})
+    .sum();
+    
+  return dryDays
+    .divide(ic.size())
+    .rename("fDryDays")
+    .toFloat()
+    .copyProperties(ic);
+}));
+////// Fraction of rainfall falling on days with > 95th percentile of wet days that year (S95pTOT, Leander et al. 2014)
+  
+var pptGt95Pc = ee.ImageCollection(annualPptHYear.map(function(ic) {
+  ic = ee.ImageCollection(ic);
+  
+  var pptSumYear = ic.sum();
+  
+  var wetDaysYear = ic.map(function(img) {
+    var wetMask = img.gte(1);
+    return img.updateMask(wetMask);
+  });
+  
+  var wetDays95PcYear = wetDaysYear
+    .reduce(ee.Reducer.percentile([95]));
+  
+  var pptGt95PcYear = ic.map(function(img) {
+    img = ee.Image(img);
+    
+    var isGreater = img.gt(wetDays95PcYear);
+    return img.multiply(isGreater);
+  }).sum()
+    .toFloat();
+  
+  return pptGt95PcYear
+    .divide(pptSumYear)
+    .rename("pptS95PTot")
+    .copyProperties(ic);
+  
+}));
+////// Unranked Gini Index
+var calculateUgi = function(ic) {
+  ic = ee.ImageCollection(ic);
+  
   // Days in year
-  var days = IC.size();
+  var days = ic.size();
+  
   // Total annual precipitation
-  var chirps_total = IC.sum();
+  var pptTotalYear = ic.sum();
   
   // Function to calculate a day-by-day cumulative rainfall difference
   // to iterate through ImageCollection
-  var cumulative_difference = function(img, img2) {
+  
+  var cumulativeDifference = function(img, img2) {
     // Cumulative precipitation to today
-    var precip_today = ee.Image(img);
-    var precip_to_yesterday = ee.Image(img2).select("precipitation");
-    var precip_to_today = precip_today.add(precip_to_yesterday);
+    var pptToday = ee.Image(img);
+    var pptToYesterday = ee.Image(img2).select("precipitation");
+    var pptToToday = pptToday.add(pptToYesterday);
     
     // Expected cumulative precipitation to today if evenly divided (= total rainfall / 365)
-    var expected_precip_today = ee.Image(chirps_total.divide(days))
-                                  .rename("expected");
-    var expected_precip_to_yesterday = ee.Image(img2).select("expected");
-    var expected_precip_to_today = expected_precip_today.add(expected_precip_to_yesterday);
+    var expectedPptToday = ee.Image(pptTotalYear.divide(days))
+      .rename("expected");
+    var expectedPptToYesterday = ee.Image(img2).select("expected");
+    var expectedPptToToday = expectedPptToday.add(expectedPptToYesterday);
     
     // Absolute difference in cumulative rainfall aggregated to today
-    var diff = precip_to_today.subtract(expected_precip_to_today)
-                                        .abs()
-                                        .rename("difference");
-    var cumulative_diff_to_yesterday = ee.Image(img2).select("difference");
-    var cumulative_diff_to_today = cumulative_diff_to_yesterday.add(diff);
+    var diff = pptToToday.subtract(expectedPptToToday)
+      .abs()
+      .rename("difference");
+    var cumulativeDiffToYesterday = ee.Image(img2).select("difference");
+    var cumulativeDiffToToday = cumulativeDiffToYesterday.add(diff);
     
-    return precip_to_today.addBands(expected_precip_to_today)
-                          .addBands(cumulative_diff_to_today);
+    return pptToToday
+      .addBands(expectedPptToToday)
+      .addBands(cumulativeDiffToToday);
 };
   
   // Apply function to ImageCollection to calculate absolute area under difference curve
-  var cumulative_chirps_difference = ee.Image(IC.iterate(
-                                                cumulative_difference,
-                                                ee.Image.constant([0, 0, 0])
-                                                        .rename(["precipitation", "expected", "difference"])));
+  var cumulativePptDifference = ee.Image(ic.iterate(
+    cumulativeDifference,
+    ee.Image.constant([0, 0, 0]).rename(["precipitation", "expected", "difference"])
+  ));
   // Calculate unranked GINI index (area under curve * 2)
-  return cumulative_chirps_difference.select("difference")
-                                    .multiply(2)
-                                    .divide(chirps_total)
-                                    .divide(days);
+  return cumulativePptDifference.select("difference")
+    .multiply(2)
+    .divide(pptTotalYear)
+    .divide(days)
+    .rename("pptUgi")
+    .copyProperties(ic);
 };
-var chirps_ugi = ee.ImageCollection(year_list.map(function(y) {
-  var chirps_year = chirps.filter(ee.Filter.calendarRange(y, y, "year"));
+var pptUgi = ee.ImageCollection(annualPptHYear.map(calculateUgi));
+////// Precipitation events greater than a fixed threshold
+var calcDaysGtThreshold = function(threshold) {
   
-  var ugi = calc_ugi(chirps_year);
+  threshold = ee.Number(threshold);
+  var varName = ee.String("daysGt").cat(ee.String(threshold).slice(0,2));
   
-  return ugi;
-}));
-var ugi_mean = chirps_ugi.mean();
-print("Precipitation unranked Gini index", chirps_ugi);
-Map.addLayer(ugi_mean,
-            {min: 0, max: 0.6, palette: ['#b10026','#e31a1c','#fc4e2a','#fd8d3c','#feb24c','#fed976','#ffffb2']},
-            "CHIRPS UGi");
-//// 5f. Precipitation concentration index
-var months = ee.List.sequence(1, 12);
-var calc_pci = function(IC) {
-  var monthly_precip = ee.ImageCollection(months.map(function(m) {
-    var monthly_images = IC.filter(ee.Filter.calendarRange(m, m, "month"));
-    var monthly_sum = monthly_images.sum();
-    var monthly_sum_squared = monthly_sum.pow(2).rename("squared");
-    return monthly_sum.addBands(monthly_sum_squared);
+  var daysGtThreshold = ee.ImageCollection(annualPptHYear.map(function(ic) {
+    ic = ee.ImageCollection(ic);
+    
+    var gtThresholdYear = ic.map(function(img) {
+      img = ee.Image(img);
+      
+      return img.gte(threshold);
+    }).sum()
+      .toFloat();
+    
+    return gtThresholdYear
+      .rename(varName)
+      .copyProperties(ic);
   }));
   
-  var pci = monthly_precip.select("squared").sum()
-                          .divide(monthly_precip.select("precipitation").sum().pow(2))
-                          .multiply(100)
-                          .rename("PCI");
-  return pci;
+  return daysGtThreshold;
 };
-var chirps_pci = ee.ImageCollection(year_list.map(function(y) {
-  var chirps_year = chirps.filter(ee.Filter.calendarRange(y, y, "year"));
+var pptGt10 = calcDaysGtThreshold(10);
+var pptGt30 = calcDaysGtThreshold(30);
+// Print outputs
+print("Total PPT", pptTotal, "PPT mean day", pptMeanDay, "PPT intensity", pptIntensity,
+  "PPT > 95th percentile", pptGt95Pc, "PPT > 30 mm", pptGt30, "PPT UGi", pptUgi);
+///////////////////////////////////////////////////////////
+////// 6. Calculate non-precipitation annual metrics //////
+///////////////////////////////////////////////////////////
+// Mean air temperature
+var tMeanHYears = ee.ImageCollection(yearList.map(function(y) {
+  y = ee.Number(y);
   
-  return calc_pci(chirps_year);
+  var d1 = ee.Date.fromYMD(y, 1, 1);
+  var d2 = d1.advance(2, "years");
+  
+  var tMeanYears = era5
+    .select("temperature_2m")
+    .filterDate(d1, d2);
+  
+  // Mask to hydrological year
+  var hYearImgClip = hYearImg.select(ee.List.sequence(0, tMeanYears.size().subtract(1)));
+  
+  var temperatureHYear = tMeanYears
+    .toBands()
+    .updateMask(hYearImgClip.gt(0));
+  
+  // Mean value for days during hYear
+  var tMeanHYear = temperatureHYear.reduce(ee.Reducer.mean());
+  
+  var tMeanDeg = tMeanHYear.subtract(273.15);
+  return tMeanDeg
+    .set("year", y)
+    .rename("tMean");
 }));
-var pci_mean = chirps_pci.mean();
-print("CHIRPS PCI", chirps_pci);
-Map.addLayer(pci_mean, {min: 0, max: 50, palette: ['#f0f9e8','#bae4bc','#7bccc4','#43a2ca','#0868ac']}, "PCI");
-//////////////////////////////////////////
-////// 6. Non-precipitation metrics //////
-//////////////////////////////////////////
-//// 6a. Mean air temperature
-var era5_T = ee.ImageCollection(year_list.map(function(y) {
-  var era5_year = era5.filter(ee.Filter.calendarRange(y, y, "year"));
+// MODIS burn frequency (binary variable)
+// First save burn date for each year as an annual layer
+var yearListExtended = yearList.add(2020);
+var modisBurnYears = ee.ImageCollection(yearListExtended.map(function(y) {
+  y = ee.Number(y);
   
-  var meanT = era5_year.select("temperature_2m")
-                      .mean()
-                      .subtract(273.15);    // Convert to degC
-  return meanT
-    .rename("meanT");
-})).mean();
-print("ERA5-Land mean layers", era5_T);
-Map.addLayer(era5_T.select("meanT"),
-  {min: 10, max: 30, palette: ['#fef0d9','#fdd49e','#fdbb84','#fc8d59','#ef6548','#d7301f','#990000']},
-  "ERA5-Land Mean T");
-//// 6b. MODIS daytime mean land surface temperature
-// Use native quality flags to mask low quality/cloudy pixels
-var bitwiseExtract = function(input, fromBit, toBit) {
-  var maskSize = ee.Number(1).add(toBit).subtract(fromBit);
-  var mask = ee.Number(1).leftShift(maskSize).subtract(1);
-  return input.rightShift(fromBit).bitwiseAnd(mask);
-};
-var modis_lst_day = ee.ImageCollection(year_list.map(function(y) {
-  var modis_lst_year = modis_lst.filter(ee.Filter.calendarRange(y, y, "year"));
+  var d1 = ee.Date.fromYMD(y, 1, 1);
+  var d2 = d1.advance(1, "years");
   
-  var modis_lst_high_qa = modis_lst_year.map(function(img) {
-    var qa = img.select("QC_Day");
-    var qa_mask = bitwiseExtract(qa, 0, 1).eq(0);
-    
-    return img.updateMask(qa_mask);
-  });
-  
-  var modis_lst_day_mean = modis_lst_year
-    .select("LST_Day_1km")
-    .mean()
-    .rename("lst_day_mean");
-  
-  return modis_lst_day_mean;
-}))
-  .mean()
-  .multiply(0.02)       // Scale to Kelvin
-  .subtract(273.15);    // Convert to degC
-Map.addLayer(modis_lst_day,
-  {min: 10, max: 40, palette: ['#fef0d9','#fdd49e','#fdbb84','#fc8d59','#ef6548','#d7301f','#990000']},
-  "MODIS Mean Daytime LST");
-// Resample to CHIRPS grid
-var modis_lst_resample = modis_lst_day
-  .setDefaultProjection(modis_lst.first().projection())
-  .reduceResolution({
-    reducer: ee.Reducer.mean(),
-    maxPixels: 1024,
-    bestEffort: true
-})
-  .reproject({
-    crs: chirps_proj.crs,
-    crsTransform: chirps_proj.transform
-});
-//// 6c. MODIS burn frequency
-// Mean burn frequency (yr-1) over study period
-var modis_burn_freq = ee.ImageCollection(year_list.map(function(y) {
-  var modis_burn_year = modis_burn.filter(ee.Filter.calendarRange(y, y, "year"));
-  
-  // Convert monthly "burn date" values to a binary burn/no-burn for the year
-  var modis_burn_binary = modis_burn_year
+  var modisBurnInYear = modisBurn
     .select("BurnDate")
-    .sum()
-    .gte(0);
-    
-  return modis_burn_binary;
-}))
-  .sum()
-  .divide(year_list.size());
-// Convert NA (unburned) pixel values to zero for aggregation to coarser resolution (otherwise they will be ignored)
-var modis_burn_freq_unmasked = modis_burn_freq.unmask();
-Map.addLayer(
-  modis_burn_freq_unmasked,
-  {min: 0, max: 1, palette: ['#f1eef6','#d4b9da','#c994c7','#df65b0','#e7298a','#ce1256','#91003f']},
-  "MODIS burn frequency");
-var modis_burn_freq_resample = modis_burn_freq_unmasked
-  .setDefaultProjection(modis_burn.first().projection())
+    .filterDate(d1, d2)
+    .sum();
+  
+  return modisBurnInYear
+    .set("system:time_start", d1.millis(),
+         "system:time_end", d2.millis(),
+         "year", y);
+}));
+print(modisBurnYears);
+// Create binary layer reflecting whether a fire occurred in the hydrological
+// year starting in year y
+var modisBurnHYears = ee.ImageCollection(yearList.map(function(y) {
+  var y1 = ee.Number(y);
+  var y2 = y1.add(1);
+  
+  var modisBurnY1 = modisBurnYears
+    .filter(ee.Filter.eq("year", y1))
+    .first();
+  var modisBurnY2 = modisBurnYears
+    .filter(ee.Filter.eq("year", y2))
+    .first();
+  
+  // Test if fire occurs in Y1 after start of hYear or in Y2 before start of next hYear
+  
+  var hYearBurnY1 = modisBurnY1
+    .subtract(hYearStart)
+    .gte(0)
+    .unmask(0);
+  
+  var hYearBurnY2 = modisBurnY2
+    .subtract(hYearStart)
+    .lt(0)
+    .unmask(0);
+  
+  var hYearBurnSum = hYearBurnY1.add(hYearBurnY2);
+  
+  return hYearBurnSum.set("hYear", y1);
+}));
+//////////////////////////////////////////////////
+////// 7. Export remaining annual variables //////
+//////////////////////////////////////////////////
+// Convert Image Collections to images with bands - precipitation variables
+var pptTotalBands = pptTotal
+  .toBands()
+  .rename(getBandNames("pptTotal", yearList));
+var pptMeanDayBands = pptMeanDay
+  .toBands()
+  .rename(getBandNames("pptMeanDay", yearList));
+var pptIntensityBands = pptIntensity
+  .toBands()
+  .rename(getBandNames("pptIntensity", yearList));
+var pptDryDaysBands = pptDryDays
+  .toBands()
+  .rename(getBandNames("pptDryDays", yearList));
+var pptGt95PcBands = pptGt95Pc
+  .toBands()
+  .rename(getBandNames("pptGt95Pc", yearList));
+var pptGt10Bands = pptGt10
+  .toBands()
+  .rename(getBandNames("pptGt10", yearList));
+var pptGt30Bands = pptGt30
+  .toBands()
+  .rename(getBandNames("pptGt30", yearList));
+var pptUgiBands = pptUgi
+  .toBands()
+  .rename(getBandNames("pptUgi", yearList));
+var pptVarsAnnual = ee.Image(
+  [pptTotalBands, pptMeanDayBands, pptIntensityBands, pptDryDaysBands,
+   pptGt95PcBands, pptGt10Bands, pptGt30Bands, pptUgiBands])
+  .toFloat();
+print(pptVarsAnnual);
+// Convert Image Collections to images with bands and resample - non-precipitation variables
+var tMeanBands = tMeanHYears
+  .toBands()
+  .rename(getBandNames("tMean", yearList))
+  .setDefaultProjection(era5.first().projection())
+  .resample("bilinear");
+var modisBurnBands = modisBurnHYears
+  .toBands()
+  .rename(getBandNames("modisBurn", yearList))
+  .setDefaultProjection(modisBurn.first().projection())
   .reduceResolution({
     reducer: ee.Reducer.mean(),
-    maxPixels: 1024,
-    bestEffort: true
-  })
-  .reproject({
-    crs: chirps_proj.crs,
-    crsTransform: chirps_proj.transform
+    maxPixels: 1024
   });
-//// 6d. iSDAsoil soil properties
-print("ISDA soil properties:", isda_sand, isda_clay, isda_n, isda_p);
+var nonPptVarsAnnual = ee.Image([tMeanBands, modisBurnBands]);
+print("Burn layer", modisBurnBands);
+// Export
+Export.image.toDrive({
+  image: pptVarsAnnual,
+  description: "pptVarsAnnual",
+  folder: "annual_variables",
+  region: AFRICA_BBOX,
+  crs: chirpsProj.crs,
+  crsTransform: chirpsProj.transform,
+  maxPixels: 1e9
+});
+Export.image.toDrive({
+  image: nonPptVarsAnnual,
+  description: "nonPptVarsAnnual",
+  folder: "annual_variables",
+  region: AFRICA_BBOX,
+  crs: chirpsProj.crs,
+  crsTransform: chirpsProj.transform,
+  maxPixels: 1e9
+});
+////////////////////////////////////////////////////
+////// 8. Calculate and export soil variables //////
+////////////////////////////////////////////////////
+print("ISDA soil properties:", sand, clay, soilN, soilP);
 // N and P values must be transformed with exp(x/100)-1 to reach raw values
-var isda_n_transformed = isda_n
+var soilNTransformed = soilN
   .select("mean_0_20")
   .divide(100)
   .exp()
   .subtract(1);
-var isda_p_transformed = isda_p
+var soilPTransformed = soilP
   .select("mean_0_20")
   .divide(10)
   .exp()
   .subtract(1);
   
-Map.addLayer(isda_n_transformed, {min: 0, max: 3, palette: ['#edf8fb','#b3cde3','#8c96c6','#8856a7','#810f7c']}, "soil N");
-Map.addLayer(isda_p_transformed, {min: 0, max: 20, palette: ['#edf8fb','#b3cde3','#8c96c6','#8856a7','#810f7c']}, "soil P");
+Map.addLayer(soilNTransformed, {min: 0, max: 3, palette: ['#edf8fb','#b3cde3','#8c96c6','#8856a7','#810f7c']}, "soil N");
+Map.addLayer(soilPTransformed, {min: 0, max: 20, palette: ['#edf8fb','#b3cde3','#8c96c6','#8856a7','#810f7c']}, "soil P");
 // Combine iSDAsoil data layers into a single image for 0-20cm interval
-var isda_0_20 = isda_sand.select("mean_0_20")
-  .addBands(isda_clay.select("mean_0_20"))
-  .addBands(isda_n_transformed.select("mean_0_20"))
-  .addBands(isda_p_transformed.select("mean_0_20"))
-  .rename(["sand_0_20", "clay_0_20", "n_0_20", "p_0_20"]);
+var soilCombined = sand.select("mean_0_20")
+  .addBands(clay.select("mean_0_20"))
+  .addBands(soilNTransformed.select("mean_0_20"))
+  .addBands(soilPTransformed.select("mean_0_20"))
+  .rename(["sand", "clay", "n", "p"]);
   
-var isda_0_20_reproject = isda_0_20
+var soilReproject = soilCombined
   .reduceResolution({
     reducer: ee.Reducer.mean(),
     bestEffort: true,
     maxPixels: 16384
 })
   .reproject({
-    crs: chirps_proj.crs,
-    crsTransform: chirps_proj.transform
+    crs: chirpsProj.crs,
+    crsTransform: chirpsProj.transform
 });
-////// 7. Export mean values for 2001-2019 study period in CHIRPS resolution
-// PML_V2 GPP
+// Export
 Export.image.toDrive({
-  image: gpp_mean,
-  description: "pmlv2_gpp_mean",
+  image: soilReproject,
+  description: "soil",
   folder: "main_variables",
-  crs: chirps_proj.crs,
-  crsTransform: chirps_proj.transform,
-  region: africa_bbox,
+  region: AFRICA_BBOX,
+  crs: chirpsProj.crs,
+  crsTransform: chirpsProj.transform,
   maxPixels: 1e9
-});
-// CHIRPS precipitation metrics
-Export.image.toDrive({
-  image: map,
-  description: "chirps_map",
-  folder: "main_variables",
-  crs: chirps_proj.crs,
-  crsTransform: chirps_proj.transform,
-  region: africa_bbox,
-  maxPixels: 1e9
-});
-Export.image.toDrive({
-  image: cv,
-  description: "chirps_annual_cv",
-  folder: "main_variables",
-  crs: chirps_proj.crs,
-  crsTransform: chirps_proj.transform,
-  region: africa_bbox,
-  maxPixels: 1e9
-});
-Export.image.toDrive({
-  image: dry_days_mean,
-  description: "chirps_dry_days",
-  folder: "main_variables",
-  crs: chirps_proj.crs,
-  crsTransform: chirps_proj.transform,
-  region: africa_bbox,
-  maxPixels: 1e9
-});
-Export.image.toDrive({
-  image: intensity_mean,
-  description: "chirps_intensity",
-  folder: "main_variables",
-  crs: chirps_proj.crs,
-  crsTransform: chirps_proj.transform,
-  region: africa_bbox,
-  maxPixels: 1e9
-});
-Export.image.toDrive({
-  image: chirps_exceed_threshold,
-  description: "chirps_exceed_" + threshold.toString(),
-  folder: "main_variables",
-  crs: chirps_proj.crs,
-  crsTransform: chirps_proj.transform,
-  region: africa_bbox,
-  maxPixels: 1e9
-});
-Export.image.toDrive({
-  image: mean_percentile_fraction,
-  description: "chirps_95pc",
-  folder: "main_variables",
-  crs: chirps_proj.crs,
-  crsTransform: chirps_proj.transform,
-  region: africa_bbox,
-  maxPixels: 1e9
-});
-Export.image.toDrive({
-  image: mean_wet_percentile_fraction,
-  description: "chirps_wet_95pc",
-  folder: "main_variables",
-  crs: chirps_proj.crs,
-  crsTransform: chirps_proj.transform,
-  region: africa_bbox,
-  maxPixels: 1e9
-});
-Export.image.toDrive({
-  image: ugi_mean,
-  description: "chirps_ugi",
-  folder: "main_variables",
-  crs: chirps_proj.crs,
-  crsTransform: chirps_proj.transform,
-  region: africa_bbox,
-  maxPixels: 1e9
-});
-Export.image.toDrive({
-  image: pci_mean,
-  description: "chirps_pci",
-  folder: "main_variables",
-  crs: chirps_proj.crs,
-  crsTransform: chirps_proj.transform,
-  region: africa_bbox,
-  maxPixels: 1e9
-});
-// Non-precipitation metrics
-// ERA5-Land mean T is at 0.1 degree native resolution
-// Export maintaining original resolution (downscaling from coarser to finer resolution doesn't work well in Earth Engine)
-// and complete resampling in R
-Export.image.toDrive({
-  image: era5_T,
-  description: "era5_T",
-  folder: "main_variables",
-  region: africa_bbox,
-  crs: chirps_proj.crs,
-  crsTransform: [0.1, 0, -180, 0, -0.1, 50],
-  maxPixels: 1e9
-});
-// MODIS LST
-Export.image.toDrive({
-  image: modis_lst_resample,
-  description: "modis_lst",
-  folder: "main_variables",
-  region: africa_bbox,
-  crs: chirps_proj.crs,
-  crsTransform: chirps_proj.transform,
-  maxPixels: 1e9
-});
-// MODIS burn frequency
-Export.image.toDrive({
-  image: modis_burn_freq_resample,
-  description: "modis_burn_freq",
-  folder: "main_variables",
-  region: africa_bbox,
-  crs: chirps_proj.crs,
-  crsTransform: chirps_proj.transform,
-  maxPixels: 1e9
-});
-// iSDAsoil soil properties
-Export.image.toDrive({
-  image: isda_0_20_reproject,
-  description: "isda_0_20_cm",
-  folder: "main_variables",
-  region: africa_bbox,
-  crs: chirps_proj.crs,
-  crsTransform: chirps_proj.transform,
-  maxPixels: 1e12,
-  shardSize: 64
 });

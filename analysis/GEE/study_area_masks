@@ -1,9 +1,9 @@
 /**** Start of imports. If edited, may not auto-convert in the playground. ****/
-var modis_lc = ee.ImageCollection("MODIS/006/MCD12Q1"),
+var modisLc = ee.ImageCollection("MODIS/006/MCD12Q1"),
     esa = ee.ImageCollection("ESA/WorldCover/v100"),
     ai = ee.Image("projects/sat-io/open-datasets/global_ai_et0"),
     chirps = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY"),
-    pmlv2_zero_mask = ee.Image("projects/ee-guylomax01/assets/africa_rangeland_precipitation_gpp/pmlv2_zero_mask");
+    gppZeroMask = ee.Image("projects/ee-guylomax01/assets/africa_rangeland_precipitation_gpp/gppZeroMask");
 /***** End of imports. If edited, may not auto-convert in the playground. *****/
 ///////////////////////////////////////////////////////////////////////////////////////
 ////// Script to create study area mask based on land cover and aridity criteria //////
@@ -15,20 +15,20 @@ var modis_lc = ee.ImageCollection("MODIS/006/MCD12Q1"),
 /////////////////////////////////////////////////////////////
 ////// 1. Set geographic region and period (2001-2019) //////
 /////////////////////////////////////////////////////////////
-var africa_bbox = ee.Geometry.BBox(-18, -35, 52, 20);
+var AFRICA_BBOX = ee.Geometry.BBox(-18, -35, 52, 20);
 // Dates for annual extraction of seasonal data
-var start_year = 2001;
-var end_year = 2019;
-var year_list = ee.List.sequence(start_year, end_year);
-var start_date = ee.Date.fromYMD(start_year, 1, 1);
-var end_date = ee.Date.fromYMD(end_year + 1, 1, 1);
+var START_YEAR = 2001;
+var END_YEAR = 2019;
+var yearList = ee.List.sequence(START_YEAR, END_YEAR);
+var startDate = ee.Date.fromYMD(START_YEAR, 1, 1);
+var endDate = ee.Date.fromYMD(END_YEAR + 1, 1, 1);
 // Record CHIRPS native CRS and scale for file export
-var chirps_proj = chirps.first().projection().getInfo();
+var chirpsProj = chirps.first().projection().getInfo();
 ///////////////////////////////////////////
 ////// 2. MODIS IGBP land cover mask //////
 ///////////////////////////////////////////
 // Colour palette for visualising IGBP land cover classes
-var igbp_vis = {
+var igbpVis = {
   min: 1,
   max: 17,
   palette: [
@@ -38,74 +38,74 @@ var igbp_vis = {
   ]
 };
 // Extract IGBP classification for study period from MODIS land cover product
-var igbp_lc = modis_lc.select("LC_Type1")
-                      .filter(ee.Filter.calendarRange(start_year, end_year, "year"));
+var igbpLc = modisLc.select("LC_Type1")
+                      .filter(ee.Filter.calendarRange(START_YEAR, END_YEAR, "year"));
                       
-print("MODIS IGBP Land Cover", igbp_lc);
-Map.addLayer(igbp_lc, igbp_vis, "IGBP land cover", false, 0.5);
+print("MODIS IGBP Land Cover", igbpLc);
+Map.addLayer(igbpLc, igbpVis, "IGBP land cover", false, 0.5);
 // Reclassify each image to 1 (rangeland) or zero (non-rangeland)
-var igbp_lc_mask = igbp_lc.map(function(img) {
+var igbpLcMask = igbpLc.map(function(img) {
   return img.gte(7).and(img.lte(10));
 });
 // Resample to CHIRPS projection and resolution
 // Retain pixels classified as consisting of > 75% rangeland classes across dataset
-var igbp_rangelands = igbp_lc_mask
+var igbpRangelands = igbpLcMask
   .mean()
-  .setDefaultProjection(igbp_lc_mask.first().projection())
+  .setDefaultProjection(igbpLcMask.first().projection())
   .reduceResolution({
     reducer: ee.Reducer.mean(),
     maxPixels: 256
   })
   .reproject({
-    crs: chirps_proj.crs,
-    crsTransform: chirps_proj.transform
+    crs: chirpsProj.crs,
+    crsTransform: chirpsProj.transform
   })
   .gte(0.75);
   
-// Map.addLayer(igbp_average_mask, {min: 0, max: 1}, "average mask");
+// Map.addLayer(igbpAverageMask, {min: 0, max: 1}, "average mask");
 // Additionally mask pixels that have > 10% "zero value" classes (barren land, open water, snow/ice)
-var igbp_barren_mask = igbp_lc.map(function(img) {
+var igbpBarrenMask = igbpLc.map(function(img) {
   return img.lt(15);
 });
-var igbp_non_barren = igbp_barren_mask
+var igbpNonBarren = igbpBarrenMask
   .mean()
-  .setDefaultProjection(igbp_barren_mask.first().projection())
+  .setDefaultProjection(igbpBarrenMask.first().projection())
   .reduceResolution({
     reducer: ee.Reducer.mean(),
     maxPixels: 256
   })
   .reproject({
-    crs: chirps_proj.crs,
-    crsTransform: chirps_proj.transform
+    crs: chirpsProj.crs,
+    crsTransform: chirpsProj.transform
   })
   .gte(0.9);
   
 // Combined mask
-var igbp_all = igbp_rangelands.and(igbp_non_barren);
-var study_area_class = igbp_lc
+var igbpAll = igbpRangelands.and(igbpNonBarren);
+var studyAreaClass = igbpLc
   .mode()
-  .updateMask(igbp_all);
-Map.addLayer(study_area_class, igbp_vis, "IGBP study area");
+  .updateMask(igbpAll);
+Map.addLayer(studyAreaClass, igbpVis, "IGBP study area");
 // Export masked IGBP land cover at CHIRPS resolution (taking modal value)
-var igbp_lc_resample = igbp_lc
+var igbpLcResample = igbpLc
   .toBands()
   .reduceResolution({
     reducer: ee.Reducer.mode(),
     maxPixels: 256
   })
   .reproject({
-    crs: chirps_proj.crs,
-    crsTransform: chirps_proj.transform
+    crs: chirpsProj.crs,
+    crsTransform: chirpsProj.transform
   })
-  .updateMask(igbp_all);
+  .updateMask(igbpAll);
 Export.image.toDrive({
-  image: igbp_lc_resample,
-  description: "igbp_land_cover",
-  folder: "study_area_masks",
-  scale: chirps_proj.scale,
-  crs: chirps_proj.crs,
-  crsTransform: chirps_proj.transform,
-  region: africa_bbox,
+  image: igbpLcResample,
+  description: "igbpLandCover",
+  folder: "studyAreaMasks",
+  scale: chirpsProj.scale,
+  crs: chirpsProj.crs,
+  crsTransform: chirpsProj.transform,
+  region: AFRICA_BBOX,
   maxPixels: 1e9
 });
 ///////////////////////////////////////////////////
@@ -114,96 +114,96 @@ Export.image.toDrive({
 // Calculate fraction of cropland, built up land, snow/ice, wetland, mangrove or open water (from ESA 2020 product) in CHIRPS pixels
 // Use layer to mask out >25% non-rangeland land cover in R
 var esa2020 = esa.first();
-var esa_lc = esa2020.eq(40).or(esa2020.eq(50)).or(esa2020.eq(70)).or(esa2020.eq(80)).or(esa2020.eq(95));
-var esa_lc_frac = esa_lc
+var esaLc = esa2020.eq(40).or(esa2020.eq(50)).or(esa2020.eq(70)).or(esa2020.eq(80)).or(esa2020.eq(95));
+var esaLcFrac = esaLc
   .reduceResolution({
     reducer: ee.Reducer.mean(),
     bestEffort: true,
     maxPixels: 65536
   }).reproject({
-    crs: chirps_proj.crs,
-    crsTransform: chirps_proj.transform
+    crs: chirpsProj.crs,
+    crsTransform: chirpsProj.transform
   });
-Map.addLayer(esa_lc_frac, {min: 0, max: 1, palette: ['#ffffb2','#fecc5c','#fd8d3c','#f03b20','#bd0026']}, "ESA other land fraction");
+Map.addLayer(esaLcFrac, {min: 0, max: 1, palette: ['#ffffb2','#fecc5c','#fd8d3c','#f03b20','#bd0026']}, "ESA other land fraction");
 Export.image.toDrive({
-  image: esa_lc_frac,
-  description: "esa_lc_frac",
-  folder: "study_area_masks",
-  region: africa_bbox,
-  crs: chirps_proj.crs,
-  crsTransform: chirps_proj.transform,
+  image: esaLcFrac,
+  description: "esaLcFrac",
+  folder: "studyAreaMasks",
+  region: AFRICA_BBOX,
+  crs: chirpsProj.crs,
+  crsTransform: chirpsProj.transform,
   maxPixels: 1e12
 });
 // Calculate fraction of trees (from ESA 2020 product) in CHIRPS pixels
 // Use layer to mask out >50% tree cover in R
-var esa_tree_frac = esa2020
-  .eq(10)
+var esaWoodyFrac = esa2020.
+  lte(20)
   .reduceResolution({
     reducer: ee.Reducer.mean(),
     bestEffort: true,
     maxPixels: 65536
   })
   .reproject({
-    crs: chirps_proj.crs,
-    crsTransform: chirps_proj.transform
+    crs: chirpsProj.crs,
+    crsTransform: chirpsProj.transform
   });
-Map.addLayer(esa_tree_frac, {min: 0, max: 1, palette: ['#ffffb2','#fecc5c','#fd8d3c','#f03b20','#bd0026']}, "ESA tree fraction");
+Map.addLayer(esaWoodyFrac, {min: 0, max: 1, palette: ['#ffffb2','#fecc5c','#fd8d3c','#f03b20','#bd0026']}, "ESA tree fraction");
 Export.image.toDrive({
-  image: esa_tree_frac,
-  description: "esa_tree_frac",
-  folder: "study_area_masks",
-  region: africa_bbox,
-  crs: chirps_proj.crs,
-  crsTransform: chirps_proj.transform,
+  image: esaWoodyFrac,
+  description: "esaWoodyFrac",
+  folder: "studyAreaMasks",
+  region: AFRICA_BBOX,
+  crs: chirpsProj.crs,
+  crsTransform: chirpsProj.transform,
   maxPixels: 1e12
 });
 ///////////////////////////////////
 ////// 4. Aridity index mask //////
 ///////////////////////////////////
 // Extract aridity index (to mask in R)
-var ai_chirps = ai
+var aiChirps = ai
   .reduceResolution({
     reducer: ee.Reducer.mean(),
     maxPixels: 256
   })
   .reproject({
-    crs: chirps_proj.crs,
-    crsTransform: chirps_proj.transform
+    crs: chirpsProj.crs,
+    crsTransform: chirpsProj.transform
   });
   
 Export.image.toDrive({
-  image: ai_chirps,
+  image: aiChirps,
   description: "aridity",
-  folder: "study_area_masks",
-  region: africa_bbox,
-  crs: chirps_proj.crs,
-  crsTransform: chirps_proj.transform,
+  folder: "studyAreaMasks",
+  region: AFRICA_BBOX,
+  crs: chirpsProj.crs,
+  crsTransform: chirpsProj.transform,
   maxPixels: 1e9
 });
-Map.addLayer(ai_chirps, {min: 0, max: 1}, "Aridity index");
+Map.addLayer(aiChirps, {min: 0, max: 1}, "Aridity index");
 //////////////////////////////
 ////// 5. Zero GPP mask //////
 //////////////////////////////
 // Masks out pixels with > 10% of the area with persistently zero productivity in the PML_V2 dataset
 // (believed to be artefacts of land cover classification)
-var pmlv2_zero_mask_resample = pmlv2_zero_mask
+var gppZeroMaskResample = gppZeroMask
   .reduceResolution({
     reducer: ee.Reducer.mean(),
     maxPixels: 256
   })
   .reproject({
-    crs: chirps_proj.crs,
-    crsTransform: chirps_proj.transform
+    crs: chirpsProj.crs,
+    crsTransform: chirpsProj.transform
   })
   .lte(0.25);
 Export.image.toDrive({
-  image: pmlv2_zero_mask_resample,
-  description: "pmlv2_zero_mask",
-  folder: "study_area_masks",
-  scale: chirps_proj.scale,
-  crs: chirps_proj.crs,
-  crsTransform: chirps_proj.transform,
-  region: africa_bbox,
+  image: gppZeroMaskResample,
+  description: "gppZeroMask",
+  folder: "studyAreaMasks",
+  scale: chirpsProj.scale,
+  crs: chirpsProj.crs,
+  crsTransform: chirpsProj.transform,
+  region: AFRICA_BBOX,
   maxPixels: 1e9
 });
-Map.addLayer(pmlv2_zero_mask, {min: 0, max: 1}, "zero mask");
+Map.addLayer(gppZeroMask, {min: 0, max: 1}, "zero GPP mask");
