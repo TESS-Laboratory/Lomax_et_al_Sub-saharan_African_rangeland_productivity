@@ -1,4 +1,4 @@
-# Analysis code for "Disentangling the environmental drivers of gross primary productivity in African rangelands"
+# Analysis code for "Untangling the Environmental Drivers of Gross Primary Productivity in African Rangelands"
 This repository contains R Markdown Notebooks and Google Earth Engine scripts for processing, visualising and analysing data presented in "Disentangling the environmental drivers of gross primary productivity in African rangelands" by Guy Lomax, Tom Powell, Theo Economou, Tim Lenton and Andrew Cunliffe.
 
 Publication doi: 
