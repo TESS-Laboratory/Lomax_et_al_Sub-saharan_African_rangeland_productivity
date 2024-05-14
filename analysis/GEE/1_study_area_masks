@@ -9,9 +9,10 @@ var modisLc = ee.ImageCollection("MODIS/006/MCD12Q1"),
 ////// Script to create study area mask based on land cover and aridity criteria //////
 ///////////////////////////////////////////////////////////////////////////////////////
 // Guy Lomax
-// 2022-05-31
+// 2024-05-14
 // G.Lomax@exeter.ac.uk
 // NB - Masks may run out of memory computing in Earth Engine interactive mode. Exports should complete successfully.
+// Intermediate exports to assets may be needed before loading and working with assets to prevent memory issues.
 /////////////////////////////////////////////////////////////
 ////// 1. Set geographic region and period (2001-2019) //////
 /////////////////////////////////////////////////////////////
