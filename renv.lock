@@ -189,16 +189,6 @@
       ],
       "Hash": "cad6cf7f1d5f6e906700b9d3e718c796"
     },
-    "audio": {
-      "Package": "audio",
-      "Version": "0.1-11",
-      "Source": "Repository",
-      "Repository": "CRAN",
-      "Requirements": [
-        "R"
-      ],
-      "Hash": "4ea781155975a6d220888443f5e823dc"
-    },
     "backports": {
       "Package": "backports",
       "Version": "1.4.1",
@@ -218,17 +208,6 @@
         "R"
       ],
       "Hash": "543776ae6848fde2f48ff3816d0628bc"
-    },
-    "beepr": {
-      "Package": "beepr",
-      "Version": "1.3",
-      "Source": "Repository",
-      "Repository": "CRAN",
-      "Requirements": [
-        "audio",
-        "stringr"
-      ],
-      "Hash": "b3158a579ecef0e8f7626f4dadc369d0"
     },
     "bit": {
       "Package": "bit",
