@@ -754,7 +754,6 @@ manual_palette <- c("#8DA0CB", "#66C2A5")
 
 soilN_subplot <- ggplot(smooths_binned_soilN,
                        aes(x = value, y = est)) +
-  geom_rect(xmin = 0, ymin = 0, xmax = 3.5, ymax = 2.5, fill = "grey90") +
   geom_hline(yintercept = 1, colour = "grey80", linetype = "longdash") +
   geom_line(aes(colour = cover_label), lwd = 0.75) +
   geom_ribbon(aes(ymin = ci_low, ymax = ci_high, fill = cover_label), alpha = 0.3) +
