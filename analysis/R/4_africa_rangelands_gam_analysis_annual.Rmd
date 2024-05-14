@@ -1,7 +1,7 @@
 ---
 title: Disentangling the environmental drivers of gross primary productivity in African rangelands - annual analysis
-author: "Guy Lomax"
-date: '2023-10-09'
+author: Guy Lomax
+date: 2024-05-14
 output: html_notebook
 ---
 
@@ -33,9 +33,7 @@ library(here)
 # Analysis
 
 library(mgcv)
-library(parallel)
 library(tictoc)
-library(beepr)
 
 # Visualisation
 library(tmap)
@@ -49,7 +47,7 @@ plot_dir <- here("results", "figures")
 ggplot2::theme_set(theme_bw())
 
 # Establish number of cores for parallel computing
-nc <- (detectCores() / 4)
+nc <- (parallel::detectCores() / 4)
 
 ```
 

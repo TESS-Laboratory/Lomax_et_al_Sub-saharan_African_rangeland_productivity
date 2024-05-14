@@ -1,7 +1,11 @@
 ---
-title: "Exploratory plots and maps"
+title: Exploratory plots and maps
+author: Guy Lomax
+date: 2024-05-14
 output: html_notebook
 ---
+
+Generates plots and maps of GPP, land cover and covariates used in the study region.
 
 ```{r setup, include=FALSE}
 
@@ -52,7 +56,7 @@ study_area_mask <- rast(here("data", "processed", "raster", "study_area_mask.tif
 
 ```
 
-
+Generate covariate scatter plots
 
 ```{r scatter_plots, eval = FALSE, echo = FALSE}
 
@@ -137,6 +141,8 @@ ggsave(here(plot_dir, "p3.png"),
 
 ```
 
+Prepare raster layers for plotting - generate additional variables and take means
+of annual variables.
 
 ```{r raster_prep}
 
