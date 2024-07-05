@@ -31,7 +31,7 @@ library(sf)
 library(here)
 
 # Analysis
-
+library(parallel)
 library(mgcv)
 library(tictoc)
 
@@ -47,7 +47,7 @@ plot_dir <- here("results", "figures")
 ggplot2::theme_set(theme_bw())
 
 # Establish number of cores for parallel computing
-nc <- (parallel::detectCores() / 4)
+nc <- detectCores() / 4
 
 ```
 
@@ -355,7 +355,18 @@ df_model_sample$cover[df_model_sample$cover == "Open_savannas"] <- "Savannas"
 df_model_sample_clean <- df_model_sample %>%
   filter(cover != "Woody_savannas") %>%
   mutate(cover = ordered(cover, levels = cover_list)) %>%
-  mutate(pptMean = pptMean * 1000)
+  mutate(pptMean = pptMean * 1000) %>%
+  mutate(pptAnomaly = (pptAnomaly - 1) * 100)
+
+# Identify 0.5th and 99.5th percentile of data in each class - exclude from
+# plots as per R2 suggestion
+
+df_model_bounds <- df_model_sample_clean %>%
+  select(cover, all_of(target_vars)) %>%
+  pivot_longer(all_of(target_vars), names_to = "variable") %>%
+  group_by(cover, variable) %>%
+  summarise(low_bound = quantile(value, 0.005),
+            high_bound = quantile(value, 0.995))
 
 # Set plot output directory
 
@@ -385,7 +396,8 @@ mod_smooths_all <- tibble(cover = rep(cover_list, each = 4),
   unnest(smooths) %>%
   mutate(ci_low = est - se * 1.96,
          ci_high = est + se * 1.96,
-         pptMean = pptMean * 1000)
+         pptMean = pptMean * 1000,
+         pptAnomaly = (pptAnomaly - 1) * 100)
 
 mod_smooths_summary <- mod_smooths_all %>%
   select(-by, -type, -smooth, -x, -y, -year) %>%
@@ -397,6 +409,10 @@ mod_smooths_summary <- mod_smooths_all %>%
             ci_low = exp(min(ci_low)),
             ci_high = exp(max(ci_high))) %>%
   ungroup()
+
+mod_smooths_summary_bounds <- mod_smooths_summary %>%
+  left_join(df_model_bounds) %>%
+  filter(value >= low_bound & value <= high_bound)
 
 palette <- "Set2"
 
@@ -412,7 +428,9 @@ plots <- map(target_vars, function(var) {
   # Plot data density plot
   data_df <- df_model_sample_clean %>%
     select(x, y, cover, all_of(var)) %>%
-    rename(z = 4)
+    rename(z = 4) %>%
+    left_join(df_model_bounds %>% filter(variable == var)) %>%
+    filter(z >= low_bound & z <= high_bound)
   
   density <- ggplot(data_df, aes(x = z)) +
     geom_density(aes(colour = cover, fill = cover),
@@ -425,7 +443,7 @@ plots <- map(target_vars, function(var) {
     theme_void()
   
   # Plot model smooths
-  smooth_df <- mod_smooths_summary %>%
+  smooth_df <- mod_smooths_summary_bounds %>%
     filter(variable == var) %>%
     mutate(cover = ordered(cover, levels = cover_list))
   
@@ -462,7 +480,7 @@ gam_plot <- ggarrange(plotlist = plots, ncol = 3, nrow = 2, common.legend = TRUE
 # Save plot
 ggsave(here(plot_dir, "gam_plot_signif_sp_annual.jpg"),
        plot = gam_plot,
-       width = 20, height = 18, units = "cm", dpi = 300)
+       width = 20, height = 30, units = "cm", dpi = 300)
 
 
 ```
@@ -626,6 +644,7 @@ mod1_smooths_binned <- read_rds(here("data", "processed", "models", "mod_binned_
   mutate(ci_low = est - se * 1.96,
          ci_high = est + se * 1.96,
          pptMean = pptMean * 1000,
+         pptAnomaly = (pptAnomaly - 1) * 100,
          k = 0)
 
 mod_smooths_binned_k8 <- read_rds(here("data", "processed", "models", "mod_binned_k8_lc_subsets.rds")) %>%
@@ -636,6 +655,7 @@ mod_smooths_binned_k8 <- read_rds(here("data", "processed", "models", "mod_binne
   mutate(ci_low = est - se * 1.96,
          ci_high = est + se * 1.96,
          pptMean = pptMean * 1000,
+         pptAnomaly = (pptAnomaly - 1) * 100,
          k = 8)
 
 mod_smooths_binned_k12 <- read_rds(here("data", "processed", "models", "mod_binned_k12_lc_subsets.rds")) %>%
@@ -646,6 +666,7 @@ mod_smooths_binned_k12 <- read_rds(here("data", "processed", "models", "mod_binn
   mutate(ci_low = est - se * 1.96,
          ci_high = est + se * 1.96,
          pptMean = pptMean * 1000,
+         pptAnomaly = (pptAnomaly - 1) * 100,
          k = 12)
 
 mod_smooths_binned_k16 <- read_rds(here("data", "processed", "models", "mod_binned_k16_lc_subsets.rds")) %>%
@@ -656,11 +677,27 @@ mod_smooths_binned_k16 <- read_rds(here("data", "processed", "models", "mod_binn
   mutate(ci_low = est - se * 1.96,
          ci_high = est + se * 1.96,
          pptMean = pptMean * 1000,
+         pptAnomaly = (pptAnomaly - 1) * 100,
          k = 16)
 
 # Merge
 
 mod_smooths_binned_all <- bind_rows(mod1_smooths_binned, mod_smooths_binned_k8, mod_smooths_binned_k12, mod_smooths_binned_k16)
+
+mod_smooths_binned_all$cover[mod_smooths_binned_all$cover == "Open_shrublands"] <- "Shrublands"
+mod_smooths_binned_all$cover[mod_smooths_binned_all$cover == "Open_savannas"] <- "Savannas"
+
+# Identify 0.5th and 99.5th percentile of data in each class - exclude from
+# plots as per R2 suggestion
+
+df_binned_bounds <- df_model_sample_clean %>%
+  select(cover, pptMean, all_of(target_vars)) %>%
+  pivot_longer(all_of(target_vars), names_to = "var") %>%
+  mutate(map_bin = cut_width(pptMean / 1000, 0.4, boundary = 0)) %>%
+  filter(map_bin %in% levels(map_bin)[1:3]) %>%
+  group_by(map_bin, cover, var) %>%
+  summarise(low_bound = quantile(value, 0.005),
+            high_bound = quantile(value, 0.995))
 
 # Set plot output directory
 
@@ -707,25 +744,22 @@ bin_labels_df <- tibble(
   bin_label = ordered(bin_labels, levels = bin_labels)
 )
 
-cover_labels <- c("Shrublands", "Savannas", "Grasslands")
-
-cover_labels_df <- tibble(
-  cover = c("Open_shrublands", "Open_savannas", "Grasslands"),
-  cover_label = ordered(cover_labels, levels = cover_labels)
-)
-
 smooths_binned_labeled <- smooths_binned_merged %>%
   left_join(var_labels_df) %>%
   left_join(bin_labels_df) %>%
-  left_join(cover_labels_df)
+  mutate(cover = ordered(cover, levels = c("Shrublands", "Savannas", "Grasslands")))
+
+smooths_binned_bounds <- smooths_binned_labeled %>%
+  left_join(df_binned_bounds) %>%
+  filter(value >= low_bound & value <= high_bound)
 
 # Generate faceted plot
 palette <- "Set2"
 
-plots_binned <- ggplot(smooths_binned_labeled, aes(x = value)) +
+plots_binned <- ggplot(smooths_binned_bounds, aes(x = value)) +
   geom_hline(yintercept = 1, colour = "grey80", linetype = "longdash") +
-  geom_line(aes(y = est, colour = cover_label), lwd = 0.75) +
-  geom_ribbon(aes(ymin = ci_low, ymax = ci_high, fill = cover_label), alpha = 0.3) +
+  geom_line(aes(y = est, colour = cover), lwd = 0.75) +
+  geom_ribbon(aes(ymin = ci_low, ymax = ci_high, fill = cover), alpha = 0.3) +
   scale_colour_brewer(palette = palette, direction = -1) +
   scale_fill_brewer(palette = palette, direction = -1) +
   coord_cartesian(ylim = c(0.5, 1.5)) +
@@ -745,34 +779,5 @@ plots_binned <- ggplot(smooths_binned_labeled, aes(x = value)) +
 ggsave(here("results", "figures", "plot_binned_signif_sp_annual.jpg"),
        plots_binned,
        width = 24, height = 16, units = "cm", dpi = 300)
-
-
-# Soil nitrogen subplot
-smooths_binned_soilN <- filter(smooths_binned_labeled, var == "soilN" & map_bin == "[0,0.4]")
-
-manual_palette <- c("#8DA0CB", "#66C2A5")
-
-soilN_subplot <- ggplot(smooths_binned_soilN,
-                       aes(x = value, y = est)) +
-  geom_hline(yintercept = 1, colour = "grey80", linetype = "longdash") +
-  geom_line(aes(colour = cover_label), lwd = 0.75) +
-  geom_ribbon(aes(ymin = ci_low, ymax = ci_high, fill = cover_label), alpha = 0.3) +
-  scale_colour_manual(values = manual_palette) +
-  scale_fill_manual(values = manual_palette) +
-  coord_cartesian(ylim = c(0, 8),
-                  xlim = c(0, 3.5)) +
-  labs(x = "",
-       y = "") +
-  theme_classic() +
-  theme(panel.background = element_rect(fill = "transparent", colour = NA),
-        plot.background = element_rect(fill = "transparent", colour = NA),
-        legend.position = "none")
-
-soilN_subplot
-
-ggsave(here("results", "figures", "plot_soilN_bin_subset.png"),
-       soilN_subplot,
-       bg = "transparent",
-       width = 4, height = 4, units = "cm", dpi = 300)
 
 ```

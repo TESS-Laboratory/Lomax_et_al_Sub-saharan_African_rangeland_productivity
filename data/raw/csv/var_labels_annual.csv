@@ -1,8 +1,8 @@
 ﻿vars,label,min_0,midpoint
 pptMean,'MAP '(mm ~ yr^-1),1,-1
-pptAnomaly,'Precipitation anomaly',1,1
-tMean,'Mean air temperature (°C)',0,-1
+pptAnomaly,'% precipitation anomaly',0,0
 pptIntensity,'Intensity ' (mm ~ d^-1),1,-1
+tMean,'Mean air temperature (°C)',0,-1
 pptGt95Pc,F['95w'],1,-1
 pptUgi,'Unranked Gini index',1,-1
 seasonLength,'Season length (d)',1,-1
