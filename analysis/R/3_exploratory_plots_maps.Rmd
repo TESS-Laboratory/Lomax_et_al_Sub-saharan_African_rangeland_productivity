@@ -48,7 +48,7 @@ igbp_index <- tibble(
   cover = factor(c("Open shrublands",
                    "Open savannas",
                    "Grasslands")))
-df_cover <- left_join(df, igbp_index)
+df_cover <- inner_join(df, igbp_index)
 
 # Load variable rasters for maps
 var_stack_all <- rast(here("data", "processed", "raster", "var_raster_stack.tif"))
@@ -62,10 +62,14 @@ Generate covariate scatter plots
 
 plot_dir <- here("results", "figures")
 
+# Correct precipitation anomaly definition
+df_cover_corrected <- mutate(df_cover, pptAnomaly = (pptAnomaly - 1) * 100)
+
+
 # Two-variable plots
 # Sample to reduce display time and overplotting
 set.seed(123)
-plot_sample <- sample_n(df_cover, 4000)
+plot_sample <- sample_n(df_cover_corrected, 4000)
 
 base_plot <- ggplot(plot_sample,
                     aes(fill = cover, colour = cover),
@@ -78,7 +82,8 @@ base_plot <- ggplot(plot_sample,
   guides(colour = guide_legend(override.aes = list(size = 2)))
 
 pptMean_pptAnomaly <- base_plot + geom_point(aes(x = pptMean, y = pptAnomaly), size = 0.1) +
-  labs(x = expression(pptMean ~ (mm ~ yr^-1)), y = "Annual anomaly")
+  labs(x = expression(pptMean ~ (mm ~ yr^-1)), y = "% annual anomaly") +
+  ylim(-100, 150)
 pptMean_int <- base_plot + geom_point(aes(x = pptMean, y = pptIntensity), size = 0.1) +
   labs(x = expression(pptMean ~ (mm ~ yr^-1)), y = expression(Intensity ~ (mm ~ d^-1)))
 pptMean_season <- base_plot + geom_point(aes(x = pptMean, y = seasonLength), size = 0.1) +
@@ -105,7 +110,8 @@ gpp_fire <- base_plot + geom_point(aes(x = fire, y = gpp), size = 0.1, alpha = 0
 gpp_pptMean <- base_plot + geom_point(aes(x = pptMean, y = gpp), size = 0.1, alpha = 0.5) +
   labs(x = expression(pptMean ~ (mm ~ yr^-1)), y = gpp_expr)
 gpp_pptAnomaly <- base_plot + geom_point(aes(x = pptAnomaly, y = gpp), size = 0.1, alpha = 0.5) +
-  labs(x = "Annual precipitation anomlay", y = gpp_expr)
+  labs(x = "% annual precipitation anomlay", y = gpp_expr) +
+  xlim(-100, 150)
 gpp_int <- base_plot + geom_point(aes(x = pptIntensity, y = gpp), size = 0.1, alpha = 0.5) +
   labs(x = expression(Precipitation ~ intensity ~(mm ~ d^-1)), y = gpp_expr)
 gpp_dry <- base_plot + geom_point(aes(x = pptDryDays, y = gpp), size = 0.1, alpha = 0.5) +
